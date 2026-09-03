@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "variant"
+version = "0.2.0"
+description = "Learning-first notebooks and small collectors for official U.S. gaming revenue."
+readme = "README.md"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "requests>=2.31",
+    "beautifulsoup4>=4.12",
+    "pandas>=2.1",
+    "openpyxl>=3.1",
+    "xlrd==1.2.0",
+    "matplotlib>=3.8",
+    "jupyterlab>=4.0",
+    "ipykernel>=6.0",
+    "pytest>=8.0",
+    "pdfplumber>=0.11",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

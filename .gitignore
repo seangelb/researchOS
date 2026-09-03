@@ -1,0 +1,42 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+dist/
+build/
+.venv/
+venv/
+.env
+.env.*
+
+# Jupyter
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+notebooks/*.executed.ipynb
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+data/gaming.sqlite
+# Captured data stays local by default (immutable artifacts can be large)
+data/raw/**
+data/processed/**
+!data/raw/
+!data/raw/ny/
+!data/raw/ny/.gitkeep
+!data/raw/ny/operators/
+!data/raw/ny/operators/.gitkeep
+!data/processed/
+!data/processed/ny/
+!data/processed/ny/.gitkeep
+!data/processed/ny/operators/
+!data/processed/ny/operators/.gitkeep
+!data/raw/IL/
+!data/raw/IL/.gitkeep
+!config/
+!config/state_gaming_source_inventory.csv
