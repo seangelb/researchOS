@@ -5,8 +5,6 @@ positions, monitor valuation metrics (market value, unrealized P/L, upside to
 target), and keep dated research notes and a thesis for every idea — all in one
 self-contained, offline-friendly app.
 
-<img src="docs/screenshot.png" alt="ResearchOS dashboard" width="800" />
-
 ## Stack
 
 | Layer    | Tech |
