@@ -1,0 +1,16 @@
+# Python
+backend/.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+backend/researchos.db
+*.db
+
+# Node
+frontend/node_modules/
+frontend/dist/
+
+# Env / editors
+.env
+.env.local
+.DS_Store
