@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
-# Minimal, idempotent environment setup for the `variant` research package.
+# Minimal, idempotent, repeatable environment setup for the `variant` research
+# package. This is repeatable setup, not an exactly reproducible dependency lock:
+# Python patch versions and dependency versions are resolved at install time and
+# are not fully pinned (there is no lockfile).
 #
-# pyproject.toml pins `requires-python = ">=3.11,<3.12"`, so this script obtains a
-# reproducible CPython 3.11 via `uv` (no system Python changes), creates a
-# virtualenv, and installs the package with its dev extras exactly as documented:
+# pyproject.toml pins `requires-python = ">=3.11,<3.12"`, so this script provisions
+# CPython 3.11 via `uv` (no system Python changes), creates a virtualenv, and
+# installs the package with its dev extras exactly as documented:
 #     python -m pip install -e ".[dev]"
 #
 # It intentionally sets up no database, server, or credentials — the research
@@ -36,11 +39,27 @@ fi
 # 4. Install the package and dependencies with dev extras.
 # shellcheck disable=SC1091
 . .venv/bin/activate
+
+# Validate the active interpreter is Python 3.11. If a pre-existing .venv uses a
+# different version, fail clearly instead of proceeding. We never auto-delete or
+# rebuild the environment; the operator decides how to recreate it.
+python - <<'PY'
+import sys
+version = "%d.%d" % sys.version_info[:2]
+if sys.version_info[:2] != (3, 11):
+    sys.exit(
+        "ERROR: .venv uses Python %s, but this project requires Python 3.11.\n"
+        "Remove .venv (or recreate it with Python 3.11) and re-run setup." % version
+    )
+print("Active interpreter: Python %s" % sys.version.split()[0])
+PY
+
 python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
 
 # 5. Register a Jupyter kernel so the tracked notebooks can be executed with the
-#    already-installed Jupyter dependencies (jupyterlab / ipykernel).
-python -m ipykernel install --user --name python3 --display-name "Python 3.11 (variant)" >/dev/null 2>&1 || true
+#    already-installed Jupyter dependencies (jupyterlab / ipykernel). Registration
+#    failures are surfaced (not suppressed) so setup fails clearly.
+python -m ipykernel install --user --name python3 --display-name "Python 3.11 (variant)"
 
 echo "==> Environment ready: $(python --version)"
