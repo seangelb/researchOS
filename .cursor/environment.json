@@ -1,0 +1,4 @@
+{
+  "name": "variant / researchOS",
+  "install": "bash .cursor/install.sh"
+}
