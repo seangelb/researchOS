@@ -75,12 +75,111 @@ PERIOD_RE = re.compile(
 MONEY_TOKEN_RE = re.compile(
     r"\(?\$?-?\d{1,3}(?:,\d{3})+(?:\.\d+)?\)?|\(?\$?-?\d+(?:\.\d+)?\)?"
 )
+DASH_ONLY_RE = re.compile(r"^\$?\s*-\s*$")
+SPORTS_SKIN_VALUE_LABELS = SPORTS_SKIN_GGR_LABELS + (
+    "Monthly Internet Sports Wagering Gross Revenue",
+    "Current Month Internet Sports Wagering Gross Revenue",
+)
+RETAIL_SPORTS_GGR_MARKERS = (
+    "Retail Sports Wagering Gross Revenue",
+    "Monthly Retail Sports Wagering Gross Revenue",
+    "Current Month Sports Wagering Gross Revenue",
+)
+TAXABLE_SPORTS_LABELS = ("Monthly Taxable Online Sportsbook Gross Revenue",)
 
 
 def _cell_text(value) -> str:
     if value is None:
         return ""
     return re.sub(r"\s+", " ", str(value).replace("\xa0", " ")).strip()
+
+
+def parse_source_cell(cell) -> dict:
+    """Parse one PDF table cell. Dash means arithmetic zero; never invent values."""
+    raw = "" if cell is None else str(cell).replace("\n", " ")
+    text = _cell_text(raw)
+    if text == "":
+        return {"value": None, "was_dash": False, "raw": raw, "status": "absent"}
+    if DASH_ONLY_RE.match(text) or text in {"$-", "($-", "($-)"}:
+        return {"value": 0.0, "was_dash": True, "raw": text, "status": "dash_zero"}
+    # Cell-local only: join split digits ('7 4' -> '74') without touching multi-column lines.
+    compact = repair_pdf_line(text)
+    previous = None
+    while previous != compact:
+        previous = compact
+        compact = re.sub(r"(\d)\s+(\d)", r"\1\2", compact)
+    vals = money_tokens(compact)
+    numeric = [v for v in vals if v is not None]
+    if len(numeric) == 1:
+        return {"value": float(numeric[0]), "was_dash": False, "raw": text, "status": "numeric"}
+    if vals and all(v is None for v in vals):
+        return {"value": 0.0, "was_dash": True, "raw": text, "status": "dash_zero"}
+    return {"value": None, "was_dash": False, "raw": text, "status": "ambiguous"}
+
+
+def _header_brands(header_row) -> list[str | None]:
+    names: list[str | None] = []
+    for cell in (header_row or [])[2:]:
+        text = _cell_text(str(cell).replace("\n", " ") if cell else "")
+        cleaned = re.sub(r"\bGross Revenue\b", "", text, flags=re.IGNORECASE)
+        cleaned = re.sub(r"\bWin\b", "", cleaned, flags=re.IGNORECASE)
+        cleaned = _cell_text(cleaned)
+        if cleaned.casefold() == "total":
+            names.append("Total")
+        elif cleaned:
+            names.append(cleaned)
+        else:
+            names.append(None)
+    return names
+
+
+def _find_labeled_table_row(tables, labels: tuple[str, ...]):
+    for table_index, table in enumerate(tables or []):
+        if not table:
+            continue
+        header = table[0]
+        for row in table[1:]:
+            if not row or len(row) < 2:
+                continue
+            desc = _cell_text(str(row[1] or "").replace("\n", " "))
+            if any(label.casefold() in desc.casefold() for label in labels):
+                return table_index, header, row, desc
+    return None, None, None, None
+
+
+def _last_nonempty_cell(row) -> object:
+    for cell in reversed(list(row[2:] if row and len(row) > 2 else [])):
+        if cell is not None and _cell_text(str(cell)) != "":
+            return cell
+    if row is not None and len(row) > 2:
+        return row[-1]
+    return None
+
+
+def _match_label(description: str, labels: tuple[str, ...]) -> str | None:
+    for label in labels:
+        if label.casefold() in description.casefold():
+            return label
+    return None
+
+
+def _is_retail_only_sports_tax_page(text: str) -> bool:
+    text_cf = text.casefold()
+    has_online = any(label.casefold() in text_cf for label in SPORTS_GGR_LABELS)
+    has_retail = any(marker.casefold() in text_cf for marker in RETAIL_SPORTS_GGR_MARKERS)
+    return has_retail and not has_online
+
+
+def _amount_from_labeled_row(tables, labels: tuple[str, ...]) -> tuple[str, float | None, str | None]:
+    """Return (status, value, matched_label). status: ok|missing|fail."""
+    _ti, _header, row, desc = _find_labeled_table_row(tables, labels)
+    if row is None or desc is None:
+        return "missing", None, None
+    label = _match_label(desc, labels)
+    parsed = parse_source_cell(_last_nonempty_cell(row))
+    if parsed["status"] in {"absent", "ambiguous"}:
+        return "fail", None, label
+    return "ok", parsed["value"], label
 
 
 def repair_pdf_line(text: str) -> str:
@@ -277,65 +376,106 @@ def _skin_brands_from_table(page) -> list[str]:
     return []
 
 
-def parse_sports_tax_page(text: str) -> dict | None:
-    amount, label = _first_amount(text, SPORTS_GGR_LABELS)
-    if amount is None and label is None:
-        return None
-    tax, _tax_label = _first_amount(text, SPORTS_TAX_LABELS)
-    taxable, _ = _first_amount(text, ("Monthly Taxable Online Sportsbook Gross Revenue",))
-    lines = text.splitlines()
-    return {
-        "operator": _entity_name(lines),
-        "row_type": "operator",
-        "gross_revenue": amount,
-        "taxable_revenue": taxable,
-        "tax": tax,
-        "reported_revenue_name": label or SPORTS_GGR_LABELS[0],
-        "is_skin": False,
-    }
+def parse_sports_tax_page(page, text: str) -> tuple[str, dict | None]:
+    """Parse one sports tax page from table cells only.
+
+    Returns (status, row) where status is ok | excluded_retail | fail.
+    """
+    tables = page.extract_tables() or []
+    ggr_status, amount, label = _amount_from_labeled_row(tables, SPORTS_GGR_LABELS)
+    if ggr_status == "missing":
+        if _is_retail_only_sports_tax_page(text):
+            return "excluded_retail", None
+        return "fail", None
+    if ggr_status == "fail":
+        return "fail", None
+
+    tax_status, tax, _tax_label = _amount_from_labeled_row(tables, SPORTS_TAX_LABELS)
+    if tax_status == "fail":
+        return "fail", None
+    taxable_status, taxable, _ = _amount_from_labeled_row(tables, TAXABLE_SPORTS_LABELS)
+    if taxable_status == "fail":
+        return "fail", None
+
+    return (
+        "ok",
+        {
+            "operator": _entity_name(text.splitlines()),
+            "row_type": "operator",
+            "gross_revenue": amount,
+            "taxable_revenue": taxable,
+            "tax": tax,
+            "reported_revenue_name": label or SPORTS_GGR_LABELS[0],
+            "is_skin": False,
+        },
+    )
 
 
-def parse_sports_skin_page(page, text: str) -> list[dict]:
-    brands = _skin_brands_from_table(page) or _skin_brands(text)
-    values: list[float | None] = []
-    ggr_label = SPORTS_SKIN_GGR_LABELS[0]
-    for raw_line in text.splitlines():
-        for label in SPORTS_SKIN_GGR_LABELS:
-            if label in raw_line:
-                rest = raw_line.split(label, 1)[-1]
-                values = money_tokens(rest)
-                ggr_label = label
-                break
-        if values:
-            break
-    if not brands or not values:
-        return []
-    # Drop trailing Total column if present.
-    if brands and brands[-1].casefold() == "total":
-        brands = brands[:-1]
-        if values:
-            values = values[:-1]
+def parse_sports_skin_page(page, text: str) -> tuple[str, list[dict]]:
+    """Parse one sports skin page with header/value alignment and Total reconcile.
+
+    Returns (status, rows) where status is ok | fail.
+    """
+    tables = page.extract_tables() or []
+    _ti, header, row, desc = _find_labeled_table_row(tables, SPORTS_SKIN_VALUE_LABELS)
+    if row is None or header is None or desc is None:
+        return "fail", []
+
+    brands = _header_brands(header)
+    total_idx = next((i for i, brand in enumerate(brands) if brand and brand.casefold() == "total"), None)
+    money_cells = list(row[2 : 2 + len(brands)])
+    if total_idx is None or len(money_cells) != len(brands):
+        return "fail", []
+
+    parsed_cells = [parse_source_cell(cell) for cell in money_cells]
+    if any(parsed["status"] in {"absent", "ambiguous"} for parsed in parsed_cells):
+        return "fail", []
+
+    values = [parsed["value"] for parsed in parsed_cells]
+    dashes = [parsed["was_dash"] for parsed in parsed_cells]
+    total = values[total_idx]
+    ops = [
+        (brand, value)
+        for index, (brand, value) in enumerate(zip(brands, values))
+        if index != total_idx and brand is not None
+    ]
+    op_sum = float(sum(value for _brand, value in ops))
+    label = _match_label(desc, SPORTS_SKIN_VALUE_LABELS) or SPORTS_SKIN_GGR_LABELS[0]
     entity = _entity_name(text.splitlines())
-    records = []
-    for brand, amount in zip(brands, values):
-        if amount is None or amount == 0:
-            continue
-        operator = brand
-        if operator.casefold() == entity.casefold():
-            operator = brand
-        records.append(
+
+    if all(dashes):
+        records = [
             {
-                "operator": operator,
+                "operator": brand,
                 "row_type": "operator",
-                "gross_revenue": amount,
+                "gross_revenue": 0.0,
                 "taxable_revenue": None,
                 "tax": None,
-                "reported_revenue_name": ggr_label,
+                "reported_revenue_name": label,
                 "is_skin": True,
                 "casino": entity,
             }
-        )
-    return records
+            for brand, _value in ops
+        ]
+        return "ok", records
+
+    if total is None or abs(op_sum - float(total)) > 1.0:
+        return "fail", []
+
+    records = [
+        {
+            "operator": brand,
+            "row_type": "operator",
+            "gross_revenue": float(value),
+            "taxable_revenue": None,
+            "tax": None,
+            "reported_revenue_name": label,
+            "is_skin": True,
+            "casino": entity,
+        }
+        for brand, value in ops
+    ]
+    return "ok", records
 
 
 def parse_igr_tax_page(text: str) -> dict | None:
@@ -397,6 +537,7 @@ def parse_nj_pdf(content: bytes | Path, *, vertical: str) -> pd.DataFrame:
     tax_rows: list[dict] = []
     skin_rows: list[dict] = []
     period = None
+    sports_failed = False
     with pdfplumber.open(source) as pdf:
         for page in pdf.pages:
             text = page.extract_text() or ""
@@ -408,11 +549,18 @@ def parse_nj_pdf(content: bytes | Path, *, vertical: str) -> pd.DataFrame:
                 continue
             if vertical == SPORTS_VERTICAL:
                 if kind == "sports_tax":
-                    row = parse_sports_tax_page(text)
-                    if row:
+                    status, row = parse_sports_tax_page(page, text)
+                    if status == "fail":
+                        sports_failed = True
+                        break
+                    if status == "ok" and row is not None:
                         tax_rows.append(row)
                 elif kind == "sports_skin":
-                    skin_rows.extend(parse_sports_skin_page(page, text))
+                    status, rows = parse_sports_skin_page(page, text)
+                    if status == "fail":
+                        sports_failed = True
+                        break
+                    skin_rows.extend(rows)
             else:
                 if kind == "igr_tax":
                     row = parse_igr_tax_page(text)
@@ -420,6 +568,8 @@ def parse_nj_pdf(content: bytes | Path, *, vertical: str) -> pd.DataFrame:
                         tax_rows.append(row)
                 elif kind == "igr_skin":
                     skin_rows.extend(parse_igr_skin_page(page, text))
+    if sports_failed:
+        return pd.DataFrame()
     chosen = skin_rows if skin_rows else tax_rows
     if not chosen or period is None:
         return pd.DataFrame()

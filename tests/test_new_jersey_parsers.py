@@ -11,6 +11,7 @@ from variant_gaming.states.new_jersey import (
     build_normalized_rows,
     discover_monthly_pdf_links,
     parse_nj_pdf,
+    parse_source_cell,
     repair_pdf_number,
 )
 
@@ -42,6 +43,9 @@ def test_parse_sports_june_2019_internet_line() -> None:
     assert (parsed["reported_revenue_name"] == "Monthly Internet Sports Wagering Gross Revenue").all()
     assert parsed["gross_revenue"].sum() != pytest.approx(0.0)
     assert not (parsed["gross_revenue"] == pytest.approx(667_738)).any()
+    # Dash cells must not leak form line numbers (defect B).
+    assert not (parsed["gross_revenue"] == pytest.approx(15.0)).any()
+    assert not (parsed["tax"] == pytest.approx(13.0)).any()
 
 
 def test_parse_sports_online_wagering_skins_july_2024() -> None:
@@ -56,6 +60,35 @@ def test_parse_sports_online_wagering_skins_july_2024() -> None:
     assert fanatics["gross_revenue"].sum() == pytest.approx(2_661_170.0)
     assert (parsed["reported_revenue_name"] == "Monthly Online Sports Wagering Gross Revenue").all()
     assert not (parsed["gross_revenue"] == pytest.approx(21_540)).any()
+
+
+def test_parse_sports_january_2024_no_concatenation() -> None:
+    parsed = parse_nj_pdf(
+        (FIXTURES / "sample_sports_january_2024.pdf").read_bytes(),
+        vertical=SPORTS_VERTICAL,
+    )
+    assert (parsed["period_start"] == "2024-01-01").all()
+    by_op = {
+        str(row.operator): float(row.gross_revenue)
+        for row in parsed.itertuples(index=False)
+    }
+    assert by_op["Fanduel"] == pytest.approx(80_725_429.0)
+    assert by_op["Pointsbet"] == pytest.approx(28_541_559.0)
+    assert by_op["SuperBook"] == pytest.approx(45_791.0)
+    # Concatenation artifact must not appear.
+    assert not any(value > 1e12 for value in by_op.values())
+    assert "Total" not in by_op
+
+
+def test_parse_source_cell_dash_and_negatives() -> None:
+    assert parse_source_cell("-")["value"] == 0.0
+    assert parse_source_cell("-")["was_dash"] is True
+    assert parse_source_cell("$ -")["value"] == 0.0
+    assert parse_source_cell("(6,295)")["value"] == pytest.approx(-6295.0)
+    assert parse_source_cell("8 0,725,429")["value"] == pytest.approx(80_725_429.0)
+    assert parse_source_cell("")["status"] == "absent"
+    assert parse_source_cell("7 4")["value"] == pytest.approx(74.0)
+    assert parse_source_cell("12,345 and 67,890")["status"] == "ambiguous"
 
 
 def test_sports_normalized_channel() -> None:
@@ -73,6 +106,7 @@ def test_sports_normalized_channel() -> None:
     )
     assert (rows["channel"] == "online").all()
     assert (rows["vertical"] == SPORTS_VERTICAL).all()
+    assert rows["handle"].isna().all()
 
 
 def test_parse_igr_win_july_2026() -> None:
