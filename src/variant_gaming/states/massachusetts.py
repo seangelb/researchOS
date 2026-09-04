@@ -264,6 +264,7 @@ def parse_online_section(text: str) -> tuple[list[dict], dict | None]:
             if amounts is not None:
                 total_online = {
                     "wagers_settled": amounts[0],
+                    "accrual_win": amounts[1],
                     "taxable_revenue": amounts[2],
                     "tax_collected": amounts[3],
                 }
@@ -277,6 +278,7 @@ def parse_online_section(text: str) -> tuple[list[dict], dict | None]:
                     {
                         "operator": operator,
                         "wagers_settled": amounts[0],
+                        "accrual_win": amounts[1],
                         "taxable_revenue": amounts[2],
                         "tax_collected": amounts[3],
                     }
@@ -294,6 +296,7 @@ def parse_online_section(text: str) -> tuple[list[dict], dict | None]:
                 {
                     "operator": operator,
                     "wagers_settled": amounts[0],
+                    "accrual_win": amounts[1],
                     "taxable_revenue": amounts[2],
                     "tax_collected": amounts[3],
                 }
@@ -306,12 +309,17 @@ def parse_online_section(text: str) -> tuple[list[dict], dict | None]:
 
 
 # Revenue and tax reconcile to the cent; handle totals can be up to $1 below operator sums.
-RECONCILE_TOLERANCE = {"wagers_settled": 1.00, "taxable_revenue": 0.01, "tax_collected": 0.01}
+RECONCILE_TOLERANCE = {
+    "wagers_settled": 1.00,
+    "accrual_win": 0.01,
+    "taxable_revenue": 0.01,
+    "tax_collected": 0.01,
+}
 
 
 def reconcile_operators(operators: list[dict], total_online: dict) -> None:
     frame = pd.DataFrame(operators)
-    for field in ("wagers_settled", "taxable_revenue", "tax_collected"):
+    for field in ("wagers_settled", "accrual_win", "taxable_revenue", "tax_collected"):
         operator_sum = round(float(frame[field].sum()), 2)
         official = round(float(total_online[field]), 2)
         if abs(operator_sum - official) > RECONCILE_TOLERANCE[field]:
@@ -412,7 +420,7 @@ def build_normalized_rows(
                 "period_end": period_end,
                 "frequency": "monthly",
                 "handle": operator["wagers_settled"],
-                "gross_revenue": None,
+                "gross_revenue": operator["accrual_win"],
                 "adjusted_revenue": None,
                 "taxable_revenue": operator["taxable_revenue"],
                 "net_proceeds": None,

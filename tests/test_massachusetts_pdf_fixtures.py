@@ -1,9 +1,12 @@
 """Massachusetts PDF fixture parsing and collector registration."""
 
+from datetime import datetime, timezone
+from io import BytesIO
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pandas as pd
+import pdfplumber
 import pytest
 
 from variant_gaming.collect import COLLECTORS
@@ -14,6 +17,12 @@ from variant_gaming.storage import connect, ensure_schema
 FIXTURES = Path(__file__).parent / "fixtures" / "MA"
 MARCH_2023 = FIXTURES / "March-Rev-Report.pdf"
 JULY_2026 = FIXTURES / "MGC-Revenue-Report-July-2026.pdf"
+
+
+def _parse_online_totals(content: bytes) -> tuple[list[dict], dict]:
+    with pdfplumber.open(BytesIO(content)) as pdf:
+        online_text = massachusetts.find_online_operator_text(pdf)
+    return massachusetts.parse_online_section(online_text)
 
 
 def test_march_2023_parses_six_online_operators() -> None:
@@ -34,13 +43,18 @@ def test_march_2023_parses_six_online_operators() -> None:
     ]
     totals = {
         "wagers_settled": sum(op["wagers_settled"] for op in operators),
+        "accrual_win": sum(op["accrual_win"] for op in operators),
         "taxable_revenue": sum(op["taxable_revenue"] for op in operators),
         "tax_collected": sum(op["tax_collected"] for op in operators),
     }
     assert round(totals["wagers_settled"], 2) == 548_102_467.42
+    assert round(totals["accrual_win"], 2) == 46_783_507.41
     # March 2023 PDF: operator taxable lines sum 1 cent below the official Total Online row.
     assert abs(round(totals["taxable_revenue"], 2) - 45_605_606.69) <= 0.01
     assert round(totals["tax_collected"], 2) == 9_121_121.34
+    _, total_online = _parse_online_totals(MARCH_2023.read_bytes())
+    assert total_online is not None
+    assert round(total_online["accrual_win"], 2) == 46_783_507.41
 
 
 def test_july_2026_parses_seven_online_operators() -> None:
@@ -62,18 +76,24 @@ def test_july_2026_parses_seven_online_operators() -> None:
     ]
     totals = {
         "wagers_settled": sum(op["wagers_settled"] for op in operators),
+        "accrual_win": sum(op["accrual_win"] for op in operators),
         "taxable_revenue": sum(op["taxable_revenue"] for op in operators),
         "tax_collected": sum(op["tax_collected"] for op in operators),
     }
     assert round(totals["wagers_settled"], 2) == 587_101_900.84
+    assert round(totals["accrual_win"], 2) == 66_530_607.93
     assert round(totals["taxable_revenue"], 2) == 65_101_989.55
     assert round(totals["tax_collected"], 2) == 13_020_397.81
+    _, total_online = _parse_online_totals(JULY_2026.read_bytes())
+    assert total_online is not None
+    assert round(total_online["accrual_win"], 2) == 66_530_607.93
 
 
 def test_draftkings_july_2026_values() -> None:
     operators, _ = massachusetts.parse_revenue_pdf(JULY_2026.read_bytes(), expected_year=2026, expected_month=7)
     draftkings = next(op for op in operators if op["operator"] == "DraftKings")
     assert draftkings["wagers_settled"] == 281_176_332.44
+    assert draftkings["accrual_win"] == 33_004_446.68
     assert draftkings["taxable_revenue"] == 32_324_402.68
     assert draftkings["tax_collected"] == 6_464_880.54
 
@@ -96,6 +116,66 @@ def test_negative_values_remain_negative() -> None:
     amounts = massachusetts.money_fields_from_row(row)
     assert amounts is not None
     assert amounts[2] == -1234.56
+    accrual_row = "$100.00 -$1,234.56 5.00% $300.00 $50.00"
+    accrual_amounts = massachusetts.money_fields_from_row(accrual_row)
+    assert accrual_amounts is not None
+    assert accrual_amounts[1] == -1234.56
+    inline = massachusetts.parse_inline_operator_row(
+        "Test Operator $100.00 -$1,234.56 5.00% $300.00 $50.00"
+    )
+    assert inline is not None
+    operator, values = inline
+    assert operator == "Test Operator"
+    assert values[1] == -1234.56
+
+
+def test_normalized_rows_map_accrual_win_to_gross_revenue() -> None:
+    operators, (year, month) = massachusetts.parse_revenue_pdf(
+        JULY_2026.read_bytes(),
+        expected_year=2026,
+        expected_month=7,
+    )
+    retrieved_at = datetime(2026, 9, 3, 2, 38, 16, tzinfo=timezone.utc)
+    frame = massachusetts.build_normalized_rows(
+        operators,
+        year=year,
+        month=month,
+        source_url="https://massgaming.com/wp-content/uploads/MGC-Revenue-Report-July-2026.pdf",
+        source_file="tests/fixtures/MA/MGC-Revenue-Report-July-2026.pdf",
+        source_sha256="fixture-sha256",
+        retrieved_at=retrieved_at,
+    )
+    draftkings = next(op for op in operators if op["operator"] == "DraftKings")
+    row = frame.loc[frame["operator"] == "DraftKings"].iloc[0]
+    assert row["gross_revenue"] == draftkings["accrual_win"]
+    assert row["handle"] == draftkings["wagers_settled"]
+    assert row["taxable_revenue"] == draftkings["taxable_revenue"]
+    assert row["tax"] == draftkings["tax_collected"]
+    assert row["reported_revenue_name"] == massachusetts.REPORTED_REVENUE_NAME
+    assert row["source_url"].endswith("MGC-Revenue-Report-July-2026.pdf")
+    assert row["source_file"] == "tests/fixtures/MA/MGC-Revenue-Report-July-2026.pdf"
+    assert row["source_sha256"] == "fixture-sha256"
+    assert row["retrieved_at_utc"] == retrieved_at.isoformat()
+
+
+def test_accrual_win_reconciliation_failure_raises() -> None:
+    operators = [
+        {
+            "operator": "DraftKings",
+            "wagers_settled": 100.0,
+            "accrual_win": 10.0,
+            "taxable_revenue": 9.0,
+            "tax_collected": 1.0,
+        }
+    ]
+    total_online = {
+        "wagers_settled": 100.0,
+        "accrual_win": 10.02,
+        "taxable_revenue": 9.0,
+        "tax_collected": 1.0,
+    }
+    with pytest.raises(ValueError, match="Online total mismatch for accrual_win"):
+        massachusetts.reconcile_operators(operators, total_online)
 
 
 def test_june_2026_archive_link_is_corrected() -> None:
