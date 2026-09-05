@@ -8,6 +8,12 @@ Use pandas in Jupyter to inspect the results. No service or separate application
 - **`notebooks/90_consolidated_ggr.ipynb` — daily analysis.** Change states, product,
   metric, dates, and frequency, then Restart Kernel and Run All. It reads SQLite
   without downloading or writing. Optional CSV export is disabled by default.
+- **`notebooks/91_flut_ma_sportsbook_signal.ipynb` — FanDuel MA signal.** Read-only
+  Accrual Win / handle check for Jan–Jul 2026 vs 2025; fail-closed gates before YoY.
+- **`notebooks/92_flut_multistate_sportsbook_signal.ipynb` — FanDuel multi-state check.**
+  Inventories sportsbook evidence across states; conclusions only where approved (MA today).
+- **`notebooks/93_flut_online_casino_signal.ipynb` — FanDuel online casino / cross-product.**
+  MI iGaming revenue-share exploratory analysis and OSB vs casino direction table.
 - **`notebooks/20_run_all_collectors.ipynb` — updates.** Choose state/product pairs,
   inspect the plan, then set `run_downloads = True` when ready to collect.
   Each selected source runs its existing history routine. Use `selected_sources = None`
