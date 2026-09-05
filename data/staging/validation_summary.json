@@ -1,0 +1,46 @@
+{
+  "checked_at_utc": "2026-09-05T03:06:02.614842+00:00",
+  "protected_files_checked": 1135,
+  "preexisting_raw_files_preserved": 1134,
+  "original_database_sha256_before": "62afd2b97459f151e62fbbf24c7e0d0fe5a52e9dee829931d2554b9b1529d388",
+  "original_database_sha256_after": "62afd2b97459f151e62fbbf24c7e0d0fe5a52e9dee829931d2554b9b1529d388",
+  "changed_protected_files": [],
+  "notebook": {
+    "status": "passed",
+    "database": "data/staging/gaming_nationwide.sqlite",
+    "states": "all present in gaming_results",
+    "network": "blocked",
+    "sqlite": "read-only enforced",
+    "csv_export": "disabled",
+    "growth_states_reviewed_default": "[]",
+    "ma_completeness": {
+      "periods": 19,
+      "completeness": [
+        "reported_total"
+      ],
+      "ok": true
+    },
+    "database_hashes_before": {
+      "C:\\Users\\Sean\\VscProjects\\researchOS\\data\\gaming.sqlite": "62afd2b97459f151e62fbbf24c7e0d0fe5a52e9dee829931d2554b9b1529d388",
+      "C:\\Users\\Sean\\VscProjects\\researchOS\\data\\staging\\gaming_nationwide.sqlite": "023ca5e8e4c16ff0981a2783dabcedf9399939e0241701b0394bc0277eff6ce9"
+    },
+    "database_hashes_after": {
+      "C:\\Users\\Sean\\VscProjects\\researchOS\\data\\gaming.sqlite": "62afd2b97459f151e62fbbf24c7e0d0fe5a52e9dee829931d2554b9b1529d388",
+      "C:\\Users\\Sean\\VscProjects\\researchOS\\data\\staging\\gaming_nationwide.sqlite": "023ca5e8e4c16ff0981a2783dabcedf9399939e0241701b0394bc0277eff6ce9"
+    },
+    "executed_notebook": "C:\\Users\\Sean\\VscProjects\\researchOS\\notebooks\\90_consolidated_ggr.ipynb"
+  },
+  "pytest": {
+    "command": ".\\.venv\\Scripts\\python.exe -B -m pytest -q -p no:cacheprovider",
+    "passed": 185,
+    "failed": 0,
+    "seconds": 75.68
+  },
+  "git_diff_check": "passed",
+  "staging": {
+    "sha256": "023ca5e8e4c16ff0981a2783dabcedf9399939e0241701b0394bc0277eff6ce9",
+    "observations": 19837
+  },
+  "original_database_modified": false,
+  "commit_push_or_dependency_install_performed": false
+}

@@ -579,18 +579,14 @@ def parse_nj_pdf(content: bytes | Path, *, vertical: str) -> pd.DataFrame:
     frame = frame.assign(period_start=period_start, period_end=period_end)
     # Deduplicate identical brand names by summing GGR (same PDF, same brand, two casinos).
     if "gross_revenue" in frame.columns:
-        grouped = (
-            frame.groupby(["operator", "row_type", "period_start", "period_end", "reported_revenue_name"], dropna=False)
-            .agg(
-                {
-                    "gross_revenue": "sum",
-                    **({"tax": "sum"} if "tax" in frame.columns else {}),
-                    **({"taxable_revenue": "sum"} if "taxable_revenue" in frame.columns else {}),
-                }
-            )
-            .reset_index()
-        )
-        frame = grouped
+        keys = ["operator", "row_type", "period_start", "period_end", "reported_revenue_name"]
+        money_columns = [c for c in ["gross_revenue", "tax", "taxable_revenue"] if c in frame]
+        # A brand may span casinos. Every contributing cell must be known;
+        # a missing tax cell is not the same as a reported zero.
+        grouped = frame.groupby(keys, dropna=False)[money_columns]
+        totals = grouped.sum(min_count=1)
+        complete = grouped.count().eq(grouped.size(), axis=0)
+        frame = totals.where(complete).reset_index()
     return frame
 
 

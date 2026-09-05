@@ -23,6 +23,8 @@ Thumbs.db
 .vscode/
 
 data/gaming.sqlite
+# Temporary nationwide validation database stays local.
+data/staging/*.sqlite*
 # Candidate / replay artifacts stay local (never replace production DB from here)
 data/candidates/
 # Captured data stays local by default (immutable artifacts can be large)

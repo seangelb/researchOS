@@ -188,3 +188,84 @@ MONTH_NAMES = [
 
 def month_name_to_num(name: str) -> int:
     return MONTH_NAMES.index(name) + 1
+
+
+def read_transcribed_report(path):
+    """Read checked values for a few scans, only when the original bytes match.
+
+    The CSV records the page and the visual check. A changed report never
+    inherits an older transcription. This function performs no writes.
+    """
+    notes = project_root() / "config" / "transcribed_report_rows.csv"
+    rows = pd.read_csv(notes)
+    matches = rows[rows.source_sha256 == sha256_bytes(Path(path).read_bytes())].copy()
+    if matches.empty:
+        return None
+    return matches.drop(columns=["source_url", "source_file", "source_sha256", "page", "transcription_note"])
+
+
+def collect_reports(*, state_code, jurisdiction, vertical, landing_url, urls,
+                    parse_report, root=None, db_path=None):
+    """Download explicit report URLs, parse each saved file, and record failures.
+
+    The state parser owns dates, channels, metrics, and source-specific checks.
+    This shared loop only attaches provenance and saves its returned rows.
+    """
+    from urllib.parse import unquote, urlsplit
+    from variant_gaming.storage import (
+        RESULT_COLUMNS, connect, default_db_path, ensure_schema,
+        upsert_coverage, upsert_gaming_results,
+    )
+
+    root = root or project_root()
+    db_path = db_path or default_db_path(root)
+    frames, attempts = [], []
+    connection = connect(db_path)
+    ensure_schema(connection)
+    try:
+        for url in dict.fromkeys(urls):
+            attempt = {"source_url": url, "source_file": "", "rows": 0, "error": ""}
+            try:
+                response = http_get(url, timeout=30)
+                filename = unquote(urlsplit(url).path.rsplit("/", 1)[-1])
+                captured = utc_now()
+                path = save_raw_bytes(root, state_code, response.content, filename, captured)
+                attempt["source_file"] = str(path.relative_to(root))
+                frame = parse_report(path)
+                if frame.empty:
+                    raise ValueError("Report contains no supported observations")
+                frame = frame.assign(
+                    jurisdiction=jurisdiction, state_code=state_code, vertical=vertical,
+                    source_url=url, source_file=str(path.relative_to(root)),
+                    source_sha256=sha256_bytes(response.content),
+                    retrieved_at_utc=captured.isoformat(),
+                )
+                for column in RESULT_COLUMNS:
+                    if column not in frame:
+                        frame[column] = None
+                upsert_gaming_results(connection, frame)
+                frames.append(frame)
+                attempt["rows"] = len(frame)
+            except Exception as exc:
+                attempt["error"] = str(exc)
+            attempts.append(attempt)
+            print(f"  {state_code}: {attempt['rows']} rows; {attempt['error'] or filename}", flush=True)
+
+        result = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+        log_path = db_path.parent / f"{state_code}_{vertical}_collection.csv"
+        pd.DataFrame(attempts, columns=["source_url", "source_file", "rows", "error"]).to_csv(log_path, index=False)
+        failures = sum(bool(item["error"]) for item in attempts)
+        upsert_coverage(connection, {
+            "state_code": state_code, "vertical": vertical,
+            "status": "failed" if result.empty else "partial" if failures else "ok",
+            "reason": f"{len(frames)} parsed reports; {failures} failures. Details: {log_path}",
+            "official_url": landing_url,
+            "available_frequency": ";".join(sorted(result.frequency.unique())) if frames else None,
+            "earliest_period": result.period_start.min() if frames else None,
+            "latest_period": result.period_end.max() if frames else None,
+            "downloaded_file_count": sum(bool(item["source_file"]) for item in attempts),
+            "normalized_row_count": len(result), "last_retrieval_utc": utc_now().isoformat(),
+        })
+        return result
+    finally:
+        connection.close()

@@ -304,36 +304,7 @@ def collect_month(year: int, month: int, root: Path | None = None, online_only: 
         online_only=online_only,
     )
 
-    # Add official statewide total row from online operator sums when no official total line exists
-    if online_only and not normalized.empty:
-        total = {
-            "jurisdiction": "Illinois",
-            "state_code": "IL",
-            "vertical": "online_sports_betting",
-            "channel": "online",
-            "operator": "STATEWIDE",
-            "row_type": "official_statewide_total",
-            "period_start": normalized["period_start"].iloc[0],
-            "period_end": normalized["period_end"].iloc[0],
-            "frequency": "monthly",
-            "handle": float(pd.to_numeric(normalized["handle"], errors="coerce").sum()),
-            "gross_revenue": None,
-            "adjusted_revenue": float(pd.to_numeric(normalized["adjusted_revenue"], errors="coerce").sum()),
-            "taxable_revenue": None,
-            "net_proceeds": None,
-            "tax": float(pd.to_numeric(normalized["tax"], errors="coerce").sum()),
-            "reported_revenue_name": "State AGR",
-            "source_url": LANDING_URL,
-            "source_file": normalized["source_file"].iloc[0],
-            "source_sha256": normalized["source_sha256"].iloc[0],
-            "retrieved_at_utc": retrieved_at.isoformat(),
-            "report_status": "derived_from_operator_sum",
-        }
-        # IGB tax CSV has no statewide total line; mark as derived sum of operators
-        normalized = pd.concat([normalized, pd.DataFrame([total])], ignore_index=True)
-        # Prefer report_status ok for operators; statewide is clearly labeled derived
-        normalized.loc[normalized["row_type"] == "operator", "report_status"] = "ok"
-
+    # Keep operator observations; consolidation labels their sum explicitly.
     return normalized
 
 

@@ -1,12 +1,10 @@
 """Massachusetts PDF fixture parsing and collector registration."""
 
 from datetime import datetime, timezone
-from io import BytesIO
 from pathlib import Path
 from unittest.mock import MagicMock
 
 import pandas as pd
-import pdfplumber
 import pytest
 
 from variant_gaming.collect import COLLECTORS
@@ -19,14 +17,8 @@ MARCH_2023 = FIXTURES / "March-Rev-Report.pdf"
 JULY_2026 = FIXTURES / "MGC-Revenue-Report-July-2026.pdf"
 
 
-def _parse_online_totals(content: bytes) -> tuple[list[dict], dict]:
-    with pdfplumber.open(BytesIO(content)) as pdf:
-        online_text = massachusetts.find_online_operator_text(pdf)
-    return massachusetts.parse_online_section(online_text)
-
-
 def test_march_2023_parses_six_online_operators() -> None:
-    operators, (year, month) = massachusetts.parse_revenue_pdf(
+    operators, total_online, (year, month) = massachusetts.parse_revenue_pdf(
         MARCH_2023.read_bytes(),
         expected_year=2023,
         expected_month=3,
@@ -52,13 +44,13 @@ def test_march_2023_parses_six_online_operators() -> None:
     # March 2023 PDF: operator taxable lines sum 1 cent below the official Total Online row.
     assert abs(round(totals["taxable_revenue"], 2) - 45_605_606.69) <= 0.01
     assert round(totals["tax_collected"], 2) == 9_121_121.34
-    _, total_online = _parse_online_totals(MARCH_2023.read_bytes())
     assert total_online is not None
     assert round(total_online["accrual_win"], 2) == 46_783_507.41
+    assert round(total_online["taxable_revenue"], 2) == 45_605_606.69
 
 
 def test_july_2026_parses_seven_online_operators() -> None:
-    operators, (year, month) = massachusetts.parse_revenue_pdf(
+    operators, total_online, (year, month) = massachusetts.parse_revenue_pdf(
         JULY_2026.read_bytes(),
         expected_year=2026,
         expected_month=7,
@@ -84,13 +76,12 @@ def test_july_2026_parses_seven_online_operators() -> None:
     assert round(totals["accrual_win"], 2) == 66_530_607.93
     assert round(totals["taxable_revenue"], 2) == 65_101_989.55
     assert round(totals["tax_collected"], 2) == 13_020_397.81
-    _, total_online = _parse_online_totals(JULY_2026.read_bytes())
     assert total_online is not None
     assert round(total_online["accrual_win"], 2) == 66_530_607.93
 
 
 def test_draftkings_july_2026_values() -> None:
-    operators, _ = massachusetts.parse_revenue_pdf(JULY_2026.read_bytes(), expected_year=2026, expected_month=7)
+    operators, _, _ = massachusetts.parse_revenue_pdf(JULY_2026.read_bytes(), expected_year=2026, expected_month=7)
     draftkings = next(op for op in operators if op["operator"] == "DraftKings")
     assert draftkings["wagers_settled"] == 281_176_332.44
     assert draftkings["accrual_win"] == 33_004_446.68
@@ -100,7 +91,7 @@ def test_draftkings_july_2026_values() -> None:
 
 def test_retail_and_total_rows_not_emitted() -> None:
     for path in (MARCH_2023, JULY_2026):
-        operators, _ = massachusetts.parse_revenue_pdf(path.read_bytes())
+        operators, _, _ = massachusetts.parse_revenue_pdf(path.read_bytes())
         names = {op["operator"] for op in operators}
         assert "Total Retail" not in names
         assert "Total Online" not in names
@@ -129,8 +120,8 @@ def test_negative_values_remain_negative() -> None:
     assert values[1] == -1234.56
 
 
-def test_normalized_rows_map_accrual_win_to_gross_revenue() -> None:
-    operators, (year, month) = massachusetts.parse_revenue_pdf(
+def test_normalized_rows_retain_printed_total_and_operators() -> None:
+    operators, total_online, (year, month) = massachusetts.parse_revenue_pdf(
         JULY_2026.read_bytes(),
         expected_year=2026,
         expected_month=7,
@@ -144,6 +135,7 @@ def test_normalized_rows_map_accrual_win_to_gross_revenue() -> None:
         source_file="tests/fixtures/MA/MGC-Revenue-Report-July-2026.pdf",
         source_sha256="fixture-sha256",
         retrieved_at=retrieved_at,
+        total_online=total_online,
     )
     draftkings = next(op for op in operators if op["operator"] == "DraftKings")
     row = frame.loc[frame["operator"] == "DraftKings"].iloc[0]
@@ -152,10 +144,55 @@ def test_normalized_rows_map_accrual_win_to_gross_revenue() -> None:
     assert row["taxable_revenue"] == draftkings["taxable_revenue"]
     assert row["tax"] == draftkings["tax_collected"]
     assert row["reported_revenue_name"] == massachusetts.REPORTED_REVENUE_NAME
+    assert "Accrual Win" in row["reported_revenue_name"]
+    assert "Taxable Gaming Revenue" in row["reported_revenue_name"]
     assert row["source_url"].endswith("MGC-Revenue-Report-July-2026.pdf")
     assert row["source_file"] == "tests/fixtures/MA/MGC-Revenue-Report-July-2026.pdf"
     assert row["source_sha256"] == "fixture-sha256"
     assert row["retrieved_at_utc"] == retrieved_at.isoformat()
+
+    operators_out = frame[frame["row_type"] == "operator"]
+    official = frame[frame["row_type"] == "official_statewide_total"]
+    assert len(operators_out) == 7
+    assert len(official) == 1
+    assert official.iloc[0]["operator"] == "STATEWIDE"
+    assert official.iloc[0]["report_status"] == "reconciled_printed_total"
+    assert round(float(official.iloc[0]["gross_revenue"]), 2) == 66_530_607.93
+    assert round(float(official.iloc[0]["taxable_revenue"]), 2) == 65_101_989.55
+    assert round(float(official.iloc[0]["handle"]), 2) == 587_101_900.84
+    assert round(float(official.iloc[0]["tax"]), 2) == 13_020_397.81
+    # Printed control values, not a fresh operator-sum approximation.
+    assert round(float(official.iloc[0]["gross_revenue"]), 2) == round(total_online["accrual_win"], 2)
+    assert round(float(official.iloc[0]["taxable_revenue"]), 2) == round(
+        total_online["taxable_revenue"], 2
+    )
+
+
+def test_consolidation_prefers_ma_printed_total_without_double_counting() -> None:
+    from variant_gaming.consolidate import build_state_period_revenue
+
+    operators, total_online, (year, month) = massachusetts.parse_revenue_pdf(
+        JULY_2026.read_bytes(),
+        expected_year=2026,
+        expected_month=7,
+    )
+    frame = massachusetts.build_normalized_rows(
+        operators,
+        year=year,
+        month=month,
+        source_url="https://massgaming.com/wp-content/uploads/MGC-Revenue-Report-July-2026.pdf",
+        source_file="tests/fixtures/MA/MGC-Revenue-Report-July-2026.pdf",
+        source_sha256="fixture-sha256",
+        retrieved_at=datetime(2026, 9, 3, 2, 38, 16, tzinfo=timezone.utc),
+        total_online=total_online,
+    )
+    period = build_state_period_revenue(frame).iloc[0]
+    assert period["aggregation_source"] == "official_statewide_total"
+    assert period["completeness"] == "reported_total"
+    assert period["operator_count"] == 7
+    assert round(float(period["revenue"]), 2) == 66_530_607.93
+    # Must equal the printed control row, not operator_sum + official.
+    assert round(float(period["gross_revenue"]), 2) == round(total_online["accrual_win"], 2)
 
 
 def test_accrual_win_reconciliation_failure_raises() -> None:
@@ -228,8 +265,9 @@ def test_no_duplicate_operator_period_rows_in_one_run(tmp_path: Path, monkeypatc
     monkeypatch.setattr(massachusetts, "http_get", fake_http_get)
 
     result = massachusetts.collect_history(root=tmp_path, db_path=tmp_path / "gaming.sqlite")
-    assert len(result) == 6
-    keys = result[["operator", "period_start"]].drop_duplicates()
+    assert len(result) == 7  # 6 operators + printed Total Online
+    assert (result["row_type"] == "official_statewide_total").sum() == 1
+    keys = result[["operator", "period_start", "row_type"]].drop_duplicates()
     assert len(keys) == len(result)
 
 
@@ -243,8 +281,9 @@ def test_february_2023_empty_online_rows_allowed(monkeypatch) -> None:
     )
     monkeypatch.setattr(massachusetts, "parse_report_period", lambda text: (2023, 2))
     monkeypatch.setattr(massachusetts, "find_online_operator_text", lambda pdf: "")
-    operators, period = massachusetts.parse_revenue_pdf(b"%PDF-1.4 fake")
+    operators, total_online, period = massachusetts.parse_revenue_pdf(b"%PDF-1.4 fake")
     assert operators == []
+    assert total_online is None
     assert period == (2023, 2)
 
 
@@ -322,7 +361,8 @@ def test_coverage_partial_when_month_missing(tmp_path: Path, monkeypatch) -> Non
 
     # April download returns March PDF bytes; heading mismatch fails that month.
     result = massachusetts.collect_history(root=tmp_path, db_path=tmp_path / "gaming.sqlite")
-    assert len(result) == 6
+    assert len(result[result["row_type"] == "operator"]) == 6
+    assert (result["row_type"] == "official_statewide_total").sum() == 1
     conn = connect(tmp_path / "gaming.sqlite")
     ensure_schema(conn)
     coverage = conn.execute(

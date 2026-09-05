@@ -123,9 +123,6 @@ ON CONFLICT (
     net_proceeds = excluded.net_proceeds,
     tax = excluded.tax,
     reported_revenue_name = excluded.reported_revenue_name,
-    source_url = excluded.source_url,
-    source_file = excluded.source_file,
-    retrieved_at_utc = excluded.retrieved_at_utc,
     report_status = excluded.report_status
 """
 
@@ -161,6 +158,13 @@ def connect(db_path: Path) -> sqlite3.Connection:
     connection = sqlite3.connect(db_path)
     connection.row_factory = sqlite3.Row
     connection.execute("PRAGMA foreign_keys = ON")
+    return connection
+
+
+def connect_readonly(db_path: Path) -> sqlite3.Connection:
+    """Open an existing database for analysis; never create or migrate it."""
+    connection = sqlite3.connect(db_path.resolve().as_uri() + "?mode=ro", uri=True)
+    connection.row_factory = sqlite3.Row
     return connection
 
 
@@ -230,7 +234,11 @@ def _row_to_params(row: dict) -> dict:
 
 
 def upsert_gaming_results(connection: sqlite3.Connection, frame: pd.DataFrame) -> int:
-    """Insert/update rows for one collector run. Never drops other states."""
+    """Update parsed values, preserving each source's first capture metadata.
+
+    New hashes remain separate observations. Re-reading identical bytes must
+    not make an old report look newer; coverage records the last refresh time.
+    """
     if frame is None or frame.empty:
         return 0
     missing = [c for c in RESULT_COLUMNS if c not in frame.columns]

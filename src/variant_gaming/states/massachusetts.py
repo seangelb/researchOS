@@ -37,7 +37,10 @@ ARCHIVE_URL = "https://massgaming.com/regulations/revenue/revenue-report-archive
 STATE_CODE = "MA"
 JURISDICTION = "Massachusetts"
 VERTICAL = "online_sports_betting"
-REPORTED_REVENUE_NAME = "Taxable Gaming Revenue"
+# gross_revenue stores Accrual Win; taxable_revenue stores Taxable Gaming Revenue.
+REPORTED_REVENUE_NAME = (
+    "Accrual Win (gross_revenue); Taxable Gaming Revenue (taxable_revenue)"
+)
 BROWSER_HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -363,7 +366,7 @@ def parse_revenue_pdf(
     *,
     expected_year: int | None = None,
     expected_month: int | None = None,
-) -> tuple[list[dict], tuple[int, int]]:
+) -> tuple[list[dict], dict | None, tuple[int, int]]:
     with pdfplumber.open(BytesIO(content)) as pdf:
         full_text = "\n".join((page.extract_text() or "") for page in pdf.pages)
         online_text = find_online_operator_text(pdf)
@@ -376,7 +379,7 @@ def parse_revenue_pdf(
     allow_empty = (year, month) == PRE_LAUNCH_EMPTY_OK
     if not online_text:
         if allow_empty:
-            return [], (year, month)
+            return [], None, (year, month)
         raise ValueError(
             f"Missing ONLINE LICENSEE section for {year}-{month:02d} "
             "(empty online rows are only allowed for February 2023)"
@@ -384,7 +387,7 @@ def parse_revenue_pdf(
     operators, total_online = parse_online_section(online_text)
     if not operators:
         if allow_empty:
-            return [], (year, month)
+            return [], total_online, (year, month)
         raise ValueError(
             f"No Category 3 online operators parsed for {year}-{month:02d} "
             "(empty online rows are only allowed for February 2023)"
@@ -392,7 +395,7 @@ def parse_revenue_pdf(
     if total_online is None:
         raise ValueError("Missing Total Online control row")
     reconcile_operators(operators, total_online)
-    return operators, (year, month)
+    return operators, total_online, (year, month)
 
 
 def build_normalized_rows(
@@ -404,6 +407,7 @@ def build_normalized_rows(
     source_file: str,
     source_sha256: str,
     retrieved_at: datetime,
+    total_online: dict | None = None,
 ) -> pd.DataFrame:
     period_start, period_end = month_period(year, month)
     rows = []
@@ -431,6 +435,33 @@ def build_normalized_rows(
                 "source_sha256": source_sha256,
                 "retrieved_at_utc": retrieved_at.isoformat(),
                 "report_status": "ok",
+            }
+        )
+    if total_online is not None:
+        # Retain the regulator's printed Total Online control row as-is.
+        rows.append(
+            {
+                "jurisdiction": JURISDICTION,
+                "state_code": STATE_CODE,
+                "vertical": VERTICAL,
+                "channel": "online",
+                "operator": "STATEWIDE",
+                "row_type": "official_statewide_total",
+                "period_start": period_start,
+                "period_end": period_end,
+                "frequency": "monthly",
+                "handle": total_online["wagers_settled"],
+                "gross_revenue": total_online["accrual_win"],
+                "adjusted_revenue": None,
+                "taxable_revenue": total_online["taxable_revenue"],
+                "net_proceeds": None,
+                "tax": total_online["tax_collected"],
+                "reported_revenue_name": REPORTED_REVENUE_NAME,
+                "source_url": source_url,
+                "source_file": source_file,
+                "source_sha256": source_sha256,
+                "retrieved_at_utc": retrieved_at.isoformat(),
+                "report_status": "reconciled_printed_total",
             }
         )
     return pd.DataFrame(rows)
@@ -484,7 +515,7 @@ def collect_history(
             if not content.startswith(b"%PDF"):
                 raise ValueError("Downloaded bytes do not look like a PDF")
             path = save_raw_bytes(root, STATE_CODE, content, report["filename"], retrieved_at=retrieved_at)
-            operators, (year, month) = parse_revenue_pdf(
+            operators, total_online, (year, month) = parse_revenue_pdf(
                 content,
                 expected_year=report["expected_year"],
                 expected_month=report["expected_month"],
@@ -499,10 +530,11 @@ def collect_history(
                     source_file=str(path.relative_to(root)).replace("\\", "/"),
                     source_sha256=sha256_bytes(content),
                     retrieved_at=retrieved_at,
+                    total_online=total_online,
                 )
                 frames.append(frame)
                 parsed_months.append((year, month))
-                print(f"OK MA {year}-{month:02d}: {len(frame)} operators")
+                print(f"OK MA {year}-{month:02d}: {len(operators)} operators + printed Total Online")
             else:
                 # Only reachable for February 2023 (pre-launch empty online section).
                 print(f"OK MA {year}-{month:02d}: no online operator detail (pre-launch)")

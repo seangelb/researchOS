@@ -3,6 +3,7 @@
 from io import BytesIO
 
 import pandas as pd
+import pytest
 
 from variant_gaming.states.louisiana import discover_mobile_excel_links, parse_mobile_workbook
 
@@ -32,3 +33,19 @@ def test_parse_mobile_workbook_skips_placeholders() -> None:
     assert list(parsed["month"]) == [1]
     assert parsed.iloc[0]["handle"] == 1000.0
     assert parsed.iloc[0]["net_proceeds"] == 80.0
+
+
+def test_full_fiscal_sheet_rejects_conflicting_printed_dates():
+    rows = [["header", None, "wagers", None, "net", "tax"]]
+    for date in pd.date_range("2021-07-01", periods=12, freq="MS"):
+        rows.append([date, None, 1000, None, -20, 0])
+    rows[11][0] = pd.Timestamp("2021-08-01")  # Actual source error in FY22.
+    buffer = BytesIO()
+    with pd.ExcelWriter(buffer, engine="openpyxl") as writer:
+        pd.DataFrame(rows).to_excel(writer, sheet_name="FY22", header=False, index=False)
+    with pytest.warns(UserWarning, match="conflicts with fiscal position"):
+        parsed = parse_mobile_workbook(buffer.getvalue())
+    assert len(parsed) == 11
+    assert not ((parsed.year == 2022) & (parsed.month == 5)).any()
+    assert (parsed.net_proceeds == -20).all()
+    assert (parsed.tax == 0).all()

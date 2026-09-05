@@ -8,6 +8,15 @@ from typing import Callable
 import pandas as pd
 
 from variant_gaming.states import (
+    colorado,
+    kansas,
+    kentucky,
+    maine,
+    nevada,
+    oregon,
+    rhode_island,
+    vermont,
+    wyoming,
     connecticut,
     delaware,
     district_of_columbia,
@@ -63,22 +72,22 @@ COLLECTORS: dict[tuple[str, str], Collector] = {
     ("MA", "online_sports_betting"): massachusetts.collect_history,
     # Wave 3–5 coverage / special-case recorders (no invented revenue rows)
     ("AZ", "online_sports_betting"): wave_coverage.collect_arizona_coverage,
-    ("CO", "online_sports_betting"): wave_coverage.collect_colorado_coverage,
-    ("KS", "online_sports_betting"): wave_coverage.collect_kansas_coverage,
-    ("KY", "online_sports_betting"): wave_coverage.collect_kentucky_coverage,
-    ("ME", "online_sports_betting"): wave_coverage.collect_maine_sports_coverage,
+    ("CO", "online_sports_betting"): colorado.collect_history,
+    ("KS", "online_sports_betting"): kansas.collect_history,
+    ("KY", "online_sports_betting"): kentucky.collect_history,
+    ("ME", "online_sports_betting"): maine.collect_history,
     ("ME", "online_casino"): wave_coverage.collect_maine_casino_coverage,
-    ("RI", "online_sports_betting"): wave_coverage.collect_rhode_island_sports_coverage,
-    ("RI", "online_casino"): wave_coverage.collect_rhode_island_casino_coverage,
-    ("VT", "online_sports_betting"): wave_coverage.collect_vermont_coverage,
+    ("RI", "online_sports_betting"): rhode_island.collect_sports_history,
+    ("RI", "online_casino"): rhode_island.collect_casino_history,
+    ("VT", "online_sports_betting"): vermont.collect_history,
     ("VA", "online_sports_betting"): wave_coverage.collect_virginia_coverage,
-    ("WY", "online_sports_betting"): wave_coverage.collect_wyoming_coverage,
+    ("WY", "online_sports_betting"): wyoming.collect_history,
     ("FL", "online_sports_betting"): wave_coverage.collect_florida_coverage,
     ("AR", "online_sports_betting"): wave_coverage.collect_arkansas_coverage,
-    ("NV", "online_sports_betting"): wave_coverage.collect_nevada_coverage,
-    ("MS", "on_premises_mobile_sports_betting"): wave_coverage.collect_mississippi_coverage,
-    ("MT", "location_based_mobile_sports_betting"): wave_coverage.collect_montana_coverage,
-    ("OR", "online_sports_betting"): wave_coverage.collect_oregon_coverage,
+    ("NV", "online_sports_betting"): nevada.collect_history,
+    ("MS", "online_sports_betting"): wave_coverage.collect_mississippi_coverage,
+    ("MT", "online_sports_betting"): wave_coverage.collect_montana_coverage,
+    ("OR", "online_sports_betting"): oregon.collect_history,
 }
 
 
@@ -124,9 +133,17 @@ def inventory_official_url(state_code: str, vertical: str, root: Path | None = N
     return str(match.iloc[0]["official_landing_url"])
 
 
-def run_all_collectors(root: Path | None = None, db_path: Path | None = None) -> pd.DataFrame:
+def run_all_collectors(
+    root: Path | None = None,
+    db_path: Path | None = None,
+    *,
+    selected: list[tuple[str, str]] | None = None,
+) -> pd.DataFrame:
     """
-    Run every mapped collector one at a time, in inventory wave order.
+    Run selected (state, product) pairs, or all collectors when selected=None.
+
+    Each selected collector uses its existing history routine. This is a
+    choice of sources, not an incremental date-based downloader.
 
     Distinguishes this-run success (`run_status`) from stored dataset coverage
     (`coverage_status`). A raised exception always yields run_status=failed even
@@ -137,6 +154,13 @@ def run_all_collectors(root: Path | None = None, db_path: Path | None = None) ->
     from variant_gaming.storage import connect, default_db_path, ensure_schema, migrate_legacy_table
 
     root = root or project_root()
+    order = inventory_collector_order(root)
+    if selected is not None:
+        requested = {(state.upper(), product) for state, product in selected}
+        unknown = requested - COLLECTORS.keys()
+        if unknown or not requested:
+            raise ValueError(f"Choose registered state/product pairs; unknown={sorted(unknown)}")
+        order = [item for item in order if (item[1], item[2]) in requested]
     db_path = db_path or default_db_path(root)
     setup = connect(db_path)
     migrate_legacy_table(setup)
@@ -166,7 +190,7 @@ def run_all_collectors(root: Path | None = None, db_path: Path | None = None) ->
             conn.close()
 
     rows: list[dict] = []
-    for wave, state_code, vertical in inventory_collector_order(root):
+    for wave, state_code, vertical in order:
         print(f"Wave {wave}: {state_code} {vertical}", flush=True)
         started = utc_now()
         returned_rows = 0

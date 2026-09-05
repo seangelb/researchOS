@@ -51,3 +51,16 @@ def test_join_online_only_ready(handle_text: str, tax_text: str) -> None:
     # Revenue measure is AGR, not silently copied into gross_revenue
     assert "adjusted_revenue" in online.columns
     assert "handle" in online.columns
+
+
+def test_collect_month_does_not_invent_official_total(tmp_path, monkeypatch, handle_text, tax_text) -> None:
+    from variant_gaming.states import illinois
+
+    def download(family, report, *args, **kwargs):
+        return handle_text if family == "cash" else tax_text
+
+    monkeypatch.setattr(illinois, "download_igb_csv", download)
+    rows = illinois.collect_month(2026, 7, root=tmp_path)
+    assert not rows.empty
+    assert set(rows["row_type"]) == {"operator"}
+    assert "STATEWIDE" not in set(rows["operator"])

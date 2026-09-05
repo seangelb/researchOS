@@ -79,7 +79,9 @@ def parse_sports_csv(text: str) -> pd.DataFrame:
                 "year": period[0],
                 "month": period[1],
                 "handle": parse_money(row.get("Wagers")),
-                "gross_revenue": parse_money(row.get("Total Gross Gaming Revenue")),
+                "gross_revenue": parse_money(row.get("Online Sports Wagering Win/(Loss)")),
+                "adjusted_revenue": parse_money(row.get("Unadjusted Monthly Gaming Revenue")),
+                "taxable_revenue": parse_money(row.get("Total Gross Gaming Revenue")),
                 "tax": parse_money(row.get("Payment (7)")),
             }
         )
@@ -104,7 +106,8 @@ def parse_casino_csv(text: str) -> pd.DataFrame:
                 "year": period[0],
                 "month": period[1],
                 "handle": parse_money(row.get("Wagers")),
-                "gross_revenue": parse_money(row.get("Total Gross Gaming Revenue")),
+                "gross_revenue": parse_money(row.get("Online Casino Gaming Win/(Loss)")),
+                "taxable_revenue": parse_money(row.get("Total Gross Gaming Revenue")),
                 "tax": parse_money(row.get("Payment (5)")),
             }
         )
@@ -139,8 +142,8 @@ def build_normalized_rows(
                 "frequency": "monthly",
                 "handle": record.get("handle"),
                 "gross_revenue": record.get("gross_revenue"),
-                "adjusted_revenue": None,
-                "taxable_revenue": None,
+                "adjusted_revenue": record.get("adjusted_revenue"),
+                "taxable_revenue": record.get("taxable_revenue"),
                 "net_proceeds": None,
                 "tax": record.get("tax"),
                 "reported_revenue_name": reported_revenue_name,

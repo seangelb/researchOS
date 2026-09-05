@@ -435,60 +435,7 @@ def build_normalized_rows(
         return pd.DataFrame()
 
     operators = pd.DataFrame(rows)
-    # Derived statewide from online brands only.
-    statewide_handle = float(pd.to_numeric(operators["handle"], errors="coerce").sum())
-    statewide_gross = float(pd.to_numeric(operators["gross_revenue"], errors="coerce").sum())
-    statewide_taxable = None
-    statewide_tax = None
-    reported = REPORTED_GROSS_RECEIPTS
-    status = "derived_from_operator_sum"
-
-    total_row = None
-    if tax_summary is not None and not tax_summary.empty:
-        totals = tax_summary[tax_summary["is_total"]]
-        if not totals.empty:
-            total_row = totals.iloc[0]
-    retail_total = float(pd.to_numeric(brands["retail_handle"], errors="coerce").fillna(0).sum()) if "retail_handle" in brands else 0.0
-    if total_row is not None and retail_total == 0:
-        # Taxable AGR is statewide online-only this month.
-        statewide_taxable = float(total_row["taxable_agr"]) if total_row["taxable_agr"] is not None else None
-        statewide_tax = float(total_row["tax"]) if total_row["tax"] is not None else None
-        reported = REPORTED_TAXABLE_AGR
-        status = "ok"
-
-    operators = pd.concat(
-        [
-            operators,
-            pd.DataFrame(
-                [
-                    {
-                        "jurisdiction": JURISDICTION,
-                        "state_code": STATE_CODE,
-                        "vertical": VERTICAL,
-                        "channel": "online",
-                        "operator": "STATEWIDE",
-                        "row_type": "official_statewide_total" if status == "ok" else "official_statewide_total",
-                        "period_start": period_start,
-                        "period_end": period_end,
-                        "frequency": "monthly",
-                        "handle": statewide_handle,
-                        "gross_revenue": statewide_gross,
-                        "adjusted_revenue": None,
-                        "taxable_revenue": statewide_taxable,
-                        "net_proceeds": None,
-                        "tax": statewide_tax,
-                        "reported_revenue_name": reported,
-                        "source_url": source_url,
-                        "source_file": source_file,
-                        "source_sha256": source_sha256,
-                        "retrieved_at_utc": retrieved_at.isoformat(),
-                        "report_status": status,
-                    }
-                ]
-            ),
-        ],
-        ignore_index=True,
-    )
+    # These are operator observations, not a published statewide online total.
     return operators
 
 
