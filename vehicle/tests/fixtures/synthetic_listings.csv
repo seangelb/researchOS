@@ -1,0 +1,7 @@
+retailer,listing_id,vehicle_id,observed_at_utc,asking_price_usd,native_status,source_reference
+carvana,example-cv-1,SYNTHETIC-VEHICLE-A,2026-09-01T12:00:00Z,21000,Available,synthetic-example
+carvana,example-cv-2,SYNTHETIC-VEHICLE-B,2026-09-01T12:00:00Z,25000,Available,synthetic-example
+carmax,example-cm-1,SYNTHETIC-VEHICLE-A,2026-09-01T12:00:00Z,22000,Available,synthetic-example
+carvana,example-cv-1,SYNTHETIC-VEHICLE-A,2026-09-02T12:00:00Z,20500,Purchase Pending,synthetic-example
+carvana,example-cv-2,SYNTHETIC-VEHICLE-B,2026-09-02T12:00:00Z,,Available,synthetic-example
+carmax,example-cm-1,SYNTHETIC-VEHICLE-A,2026-09-02T12:00:00Z,22000,Available,synthetic-example

@@ -1,0 +1,17 @@
+{
+  "description": "Bounded Tesla Model 3 year partitions, verified in Chrome September 7, 2026. National coverage unverified.",
+  "queries": [
+    {
+      "query_id": "tesla_model3_2025",
+      "url": "https://www.carvana.com/cars/filters?cvnaid=eyJmaWx0ZXJzIjp7Im1ha2VzIjpbeyJuYW1lIjoiVGVzbGEiLCJwYXJlbnRNb2RlbHMiOlt7Im5hbWUiOiJNb2RlbCAzIn1dfV0sInllYXIiOnsibWluIjoyMDI1LCJtYXgiOjIwMjV9fX0",
+      "zip_code": "08542",
+      "max_pages": 3
+    },
+    {
+      "query_id": "tesla_model3_2026_and_newer",
+      "url": "https://www.carvana.com/cars/filters?cvnaid=eyJmaWx0ZXJzIjp7Im1ha2VzIjpbeyJuYW1lIjoiVGVzbGEiLCJwYXJlbnRNb2RlbHMiOlt7Im5hbWUiOiJNb2RlbCAzIn1dfV0sInllYXIiOnsibWluIjoyMDI2fX19",
+      "zip_code": "08542",
+      "max_pages": 3
+    }
+  ]
+}
