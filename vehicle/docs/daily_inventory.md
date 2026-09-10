@@ -5,6 +5,38 @@ evidence, imports observations into SQLite, registers the date, and writes table
 Notebook 20 starts with those tables and remains offline/read-only. The first day
 is a baseline; it cannot tell us how many vehicles sold that day.
 
+## Daily review in five minutes
+
+1. Run the preview and, when you intend to collect for the actual local date,
+   the `--live` command under **Each day** below. Do not relabel an old capture.
+2. Open notebook 20 and Run All. Read the opening daily review, query coverage,
+   and explanation of whether a consecutive-day comparison is available.
+3. Read the matched-VIN asking-price categories, paired means and composition
+   tables. Check the actual start-to-start interval beside those results; a
+   consecutive-date comparison is not necessarily a 24-hour flow. Inspect new/absent VINs and the selected follow-up queue. Unresolved listings
+   can be up to date; the queue separately shows first checks and due rechecks.
+4. In notebook 20's vehicle-inspection section, copy a full retailer/VIN/listing identity into `SELECTED_IDENTITY`.
+   Rerun that cell to see its original URL and chronological evidence. When there
+   is no queue, choose a retained inventory control; it is not a sale candidate.
+5. After actually checking a page, fill `CHECK_DRAFT` in the optional manual-check section and rerun that
+   draft cell. Follow its
+   manual console steps to prepare, preview, save, and reread one record. Those
+   commands are Markdown examples, so Run All does not save anything.
+
+Preparation produces a stable record ID. Retry saving that same prepared record
+instead of preparing again. Corrections retain the original check time and use
+later availability; a new visit has a new check time. See
+[the recording guide](listing_checks.md). A historical cutoff will intentionally
+exclude newly saved evidence until you advance it.
+
+Review first disappearances, native changes and due rechecks, plus a few unchanged
+controls. Preserve exact wording, evidence references, and uncertainty. These
+targeted checks are a biased sample, not a measurement of population-wide sales.
+
+The separate [Sold-status notebook 22](../notebooks/22_carvana_sale_status_validation.ipynb)
+contains both frozen cohorts, explicit observation coverage, and experimental
+capture/import instructions. It does not write canonical checks or analyst reviews.
+
 ## First real baseline: September 8, 2026
 
 All seven queries completed during **21:44:11-21:45:40 America/New_York**
@@ -149,6 +181,35 @@ export from registered evidence, including a visible gap through today's cutoff:
 Opening notebook 20 requires neither command. It reads the register and existing
 database. The historical walkthrough uses its separate example database. To
 reproduce a prior cutoff, set `AS_OF_OVERRIDE` before running notebook code.
+
+A registered partial date remains partial; `--live` will not replace it. Inspect
+the retained cycle and coverage diagnostics before any lower-level recovery in
+[daily_cycles.md](daily_cycles.md). An import can recover a completed capture's
+interrupted database/export step, but cannot manufacture missing requests. A day
+that was never collected remains a calendar gap.
+
+## Back up the evidence, not just the code
+
+The Git checkpoint excludes local captures and databases. When no collector or
+recording command is writing, back up `vehicle/data/experiments/carvana_daily/`,
+the page-evidence folders referenced by saved checks, and all of
+`vehicle/data/analysis/carvana_daily/` (SQLite, register, checks, reviews, and
+versioned exports/manifests). Include the tracking/query configuration and the
+code revision/diff used for analysis. Do not copy a live SQLite file alone while
+it is being written; retain any journal/WAL companions with a consistent backup.
+
+Existing registers and source references contain absolute paths. Copying the
+folder to another machine does not automatically make those bindings portable.
+Restore the original paths for a like-for-like recovery; do not silently edit
+historical evidence references or hashes.
+
+At checkpoint `052ed0b`, shared root package configuration and the gaming folder
+relocation remain uncommitted. The working setup discovers `gaming/src` and
+`vehicle/src`, while the committed root configuration still points at `src`.
+The working root notebook checker also uses `gaming/scripts/check_notebooks.py`.
+This checkout works with the shared environment; the Carvana checkpoint alone
+is not a complete fresh-checkout setup. Resolve that separate repository change
+before claiming portable reproduction. No installation is needed in this checkout.
 
 ## Vendor workbook reference
 

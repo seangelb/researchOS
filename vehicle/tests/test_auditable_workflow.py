@@ -41,6 +41,9 @@ def test_retained_iso_clocks_allow_whole_and_fractional_seconds(tmp_path, respon
         capture['captured_at_utc'] = stamp
         source.write_text(json.dumps(capture))
         page['source_sha256'] = hashlib.sha256(source.read_bytes()).hexdigest()
+        page['response_received_at_utc'] = stamp
+        page['evidence_available_at_utc'] = stamp
+    report['ended_utc'] = '2026-09-08T12:00:02+00:00'
     path.write_text(json.dumps(report))
     run, _, rows = read_query_evidence(path)
     assert run['query_complete'] == 1 and len(rows) == 27

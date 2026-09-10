@@ -108,6 +108,10 @@ def append_record(path, record, *, kind):
 
 
 def validate_check_identities(checks, observations):
+    vin_counts = observations.groupby(['retailer', 'listing_id'], as_index=False).vin.nunique(dropna=False)
+    referenced = checks[['retailer', 'listing_id']].merge(vin_counts, on=['retailer', 'listing_id'], how='left', validate='many_to_one')
+    if referenced.vin.ne(1).any():
+        raise ValueError('Check must reference an observed retailer/VIN/listing with an unambiguous VIN')
     first = observations.groupby(IDENTITY, as_index=False).observed_at_utc.min()
     joined = checks.merge(first, on=IDENTITY, how='left', validate='many_to_one')
     if (joined.observed_at_utc.isna().any() or pd.to_datetime(joined.checked_at, utc=True, format='ISO8601').lt(

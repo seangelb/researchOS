@@ -39,6 +39,13 @@ def test_first_query_interruption_keeps_plan_and_restarts(tmp_path,response_data
     assert json.loads((tmp_path/'old/run_report.json').read_text())['queries']==plan
     retained={str(p):p.read_bytes() for p in (tmp_path/'old').rglob('*') if p.is_file()}
     post=Mock(return_value=reply(response_data))
+    if boundary == 'second_request':
+        with pytest.raises(ValueError, match='blocks resume'):
+            collect_plan(plan,destination=tmp_path/'new',resume_from=tmp_path/'old/run_report.json',post=post)
+        post.assert_not_called()
+        assert not (tmp_path/'new').exists()
+        assert all(Path(p).read_bytes()==content for p,content in retained.items())
+        return
     resumed=collect_plan(plan,destination=tmp_path/'new',resume_from=tmp_path/'old/run_report.json',post=post)
     assert resumed['all_queries_complete'] and post.call_args.kwargs['json']['pagination']['page']==1
     assert all(Path(p).read_bytes()==content for p,content in retained.items())

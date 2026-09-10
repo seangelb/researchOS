@@ -75,7 +75,14 @@ Open `00_source_walkthrough.ipynb`, `10_carvana_inventory.ipynb`, then `20_carva
 powershell -File scripts/start_jupyter.ps1
 ```
 
-In notebook 20 choose the analysis `DATABASE`, `AS_OF` cutoff and `CYCLE_REPORTS` in the appended daily section explicitly. The default empty list performs no daily read. Run from a fresh kernel in order. All existing intraday cells remain intact; the daily section is separate. It displays coverage, source rows, a VIN timeline, an explicit pandas outer join and asking-price subtraction, then 2/3/7-day absence sensitivity.
+Notebook 20 reads the operating daily register by default. It shows collection
+quality, a visible VIN merge, page evidence, and a selected VIN's history, with
+optional manual check recording. Run All is offline/read-only. Use
+`AS_OF_OVERRIDE` for a historical cutoff; `CYCLE_REPORTS_OVERRIDE` and
+`DAILY_DATABASE_OVERRIDE` deliberately select other retained evidence. The older
+intraday walkthrough is in notebook 21. See [daily_inventory.md](daily_inventory.md)
+for the normal daily workflow; the lower-level commands here are for explicit
+collection/recovery cases, not a second competing daily process.
 
 Continue in notebook 30 for quarter calendars and explicitly dated scenarios.
 `read_cycle_history(..., as_of=...)` excludes later attempts and observations before
@@ -105,4 +112,9 @@ Events carry `rule_version` and `available_at`. A threshold reached after later 
 
 ## What remains to prove
 
-Complete two fresh broad cycles and then a consistent multi-day pilot. Verify plan completeness, regional/context differences, collection drift, native inventory-type meanings and event examples. Only then evaluate estimated-sales rules against overlapping vendor figures and company-reported results. Preserve forecast vintages and revisions. Do not infer reliable daily sales or national coverage from offline tests.
+Collect the unchanged pilot on consecutive actual local dates and follow missing
+and changed VINs, plus controls. Establish status persistence, reappearances and
+timing uncertainty before evaluating sales rules. Broader coverage needs a separate
+history and tests of partitions, regional context and collection drift. Preserve
+forecast vintages and revisions. Offline tests do not establish daily sales accuracy
+or national coverage.

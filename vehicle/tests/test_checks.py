@@ -163,7 +163,9 @@ def test_command_records_and_refreshes_without_collecting(settings, clock, respo
     daily.run_tracking(settings, live=True, post=Mock(return_value=reply(response_data)))  # Offline transport fixture.
     _, rows = daily.tracking_history(settings, as_of=clock.isoformat())
     row = rows.iloc[0]
-    record = check(row.vin, row.listing_id, checked_at=clock.isoformat(), available_at=clock.isoformat())
+    evidence = tmp_path/'retained-page.txt'
+    evidence.write_text('Temporary page fixture: This vehicle is no longer available')
+    record = check(row.vin, row.listing_id, checked_at=clock.isoformat(), available_at=clock.isoformat(), source=str(evidence))
     source = tmp_path/'check.json'
     source.write_text(json.dumps(record), encoding='utf-8-sig')
     module_path = Path(__file__).parents[1]/'scripts/run_carvana_daily.py'
@@ -225,12 +227,14 @@ def test_notebook_and_command_share_saved_checks_reviews_and_cutoff(settings, mo
     with checker.offline_guards():
         exec(code['daily-operating-view'], scope)
         scope.update(daily_settings=settings, daily_cycles=days, daily_observations=rows, AS_OF=cutoff)
+        exec(code['daily-operating-tables'], scope)
         exec(code['sale-review-data'], scope)
         for name, frame in command_tables.items():
             pd.testing.assert_frame_equal(frame, scope['tracking_tables'][name])
         pd.testing.assert_frame_equal(scope['sale_candidate_rows'], command_tables['sale_candidates'])
         scope['SALES_REVIEWS_OVERRIDE'] = []
         exec(code['daily-operating-view'], scope)
+        exec(code['daily-operating-tables'], scope)
         exec(code['sale-review-data'], scope)
     assert command_tables['daily_inventory'].reviewed_sales_with_known_date.sum() == 1
     assert scope['operating_candidates'].review_outcome.eq('unreviewed').all()

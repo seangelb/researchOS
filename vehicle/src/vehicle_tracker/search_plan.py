@@ -8,7 +8,7 @@ import time
 import pandas as pd
 
 from vehicle_tracker.collect import NavigationBudget
-from vehicle_tracker.search import collect_search
+from vehicle_tracker.search import ENDPOINT, collect_search, search_transport
 from vehicle_tracker.storage import read_snapshots, write_json_atomic
 from vehicle_tracker.carvana import parse_capture
 
@@ -22,7 +22,13 @@ def query_outcome(name, folder, *, recover=False):
     folder = Path(folder)
     report_file, database = folder/'run_report.json', folder/'vehicle.sqlite'
     report = json.loads(report_file.read_text(encoding='utf-8'))
-    artifacts = [report_file, database] + [Path(p['retained_source']) for p in report['pages']]
+    artifacts = [report_file] + ([database] if database.is_file() else [])
+    for page in report['pages']:
+        if page.get('retained_source'):
+            artifacts.append(Path(page['retained_source']))
+        if page.get('response_evidence', {}).get('source_path'):
+            artifacts.append(Path(page['response_evidence']['source_path']))
+    artifacts.extend(sorted((folder/'attempts').glob('*.json')))
     if recover:
         from vehicle_tracker.history import read_query_evidence
         read_query_evidence(report_file)  # Reconcile claimed completeness to native pages.
@@ -34,7 +40,16 @@ def query_outcome(name, folder, *, recover=False):
             if page['status'] != 'parsed':
                 raise ValueError('Recovered complete query contains a failed page')
             frames.append(parse_capture(json.loads(source.read_text(encoding='utf-8'))))
-        _, stored = read_snapshots(database)
+        captured, stored = read_snapshots(database)
+        if (len(captured) != len(report['pages']) or set(captured.run_id) != {report['run_id']}
+                or captured.page_number.tolist() != list(range(1, len(captured)+1))):
+            raise ValueError('Recovered capture records differ from the query report')
+        for page, saved in zip(report['pages'], captured.to_dict('records')):
+            raw = json.loads(Path(page['retained_source']).read_text(encoding='utf-8'))
+            if (saved['source_sha256'] != page['source_sha256'] or saved['status'] != 'parsed'
+                    or saved['row_count'] != page['stored_rows'] or saved['observed_at_utc'] != raw['captured_at_utc']
+                    or raw['request']['sortBy'] != 'MostPopular'):
+                raise ValueError('Recovered capture context/identities require review')
         if frames and not all(f.empty for f in frames):
             expected = pd.concat(frames, ignore_index=True).sort_values('listing_id').reset_index(drop=True)
             try:
@@ -43,9 +58,24 @@ def query_outcome(name, folder, *, recover=False):
                 raise ValueError('Recovered database differs from retained source') from exc
         if len(stored) != report['complete_query_count']:
             raise ValueError('Recovered complete count differs from stored observations')
-    return dict(query_id=name, query_complete=report['query_complete'], status=report['status'],
-        reason=report['reason'], report=str(report_file), database=str(database),
+    entry = dict(query_id=name, query_complete=report['query_complete'], status=report['status'],
+        reason=report['reason'], report=str(report_file), outcome_kind=report.get('outcome_kind'),
         artifact_hashes={str(p): digest(p) for p in artifacts}, resumed=recover)
+    if database.is_file():
+        entry['database'] = str(database)
+    return entry
+
+
+def require_safe_resume(report):
+    """A new budget must not turn a previous access block into an automatic retry."""
+    for page in report.get('pages', []):
+        status = page.get('http_status')
+        uncertain = page.get('request_started_at_utc') and not page.get('response_received_at_utc')
+        old_failure = any(word in page.get('error', '') for word in
+                          ('TimeoutError', 'ConnectionError', 'unexpected_content', 'cloudflare', 'http_access', 'rate_limited'))
+        if (page.get('outcome_kind') in {'access_failure', 'transport_failure', 'request_reserved'}
+                or uncertain or (status is not None and status != 200) or old_failure):
+            raise ValueError('Prior access/transport outcome blocks resume; no automatic retry')
 
 
 def validate_plan(queries):
@@ -85,10 +115,14 @@ def collect_plan(queries, *, destination, target_listings=1000, budget=None, res
         if prior['queries'] != queries:
             raise ValueError('Resume requires the identical query plan')
         previous = {r['query_id']: r for r in prior.get('outcomes', []) if r.get('query_complete')}
+        for outcome in prior.get('outcomes', []):
+            if outcome.get('report'):
+                require_safe_resume(json.loads(Path(outcome['report']).read_text(encoding='utf-8')))
         for query in queries:
             child = resume_path.parent/query['query_id']/'run_report.json'
             if query['query_id'] not in previous and child.is_file():
                 report = json.loads(child.read_text(encoding='utf-8'))
+                require_safe_resume(report)
                 if report['filters'] != query['filters'] or report['zip_code'] != query['zip_code'] or report.get('location_filter', False) != query.get('location_filter', False):
                     raise ValueError('Recovered child query differs from the plan')
                 if report['query_complete']:
@@ -100,6 +134,15 @@ def collect_plan(queries, *, destination, target_listings=1000, budget=None, res
             for path, expected in entry['artifact_hashes'].items():
                 if digest(path) != expected:
                     raise ValueError('Resume artifact changed; retained results require review')
+        for query in queries:
+            if query['query_id'] in previous:
+                entry = previous[query['query_id']]
+                report = json.loads(Path(entry['report']).read_text(encoding='utf-8'))
+                if (not report['query_complete'] or report['endpoint'] != ENDPOINT
+                        or any(report.get(k, False) != query.get(k, False)
+                               for k in ('filters', 'zip_code', 'location_filter'))):
+                    raise ValueError('Reused complete query differs from requested settings')
+                previous[query['query_id']] = query_outcome(query['query_id'], Path(entry['report']).parent, recover=True)
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=False)
     budget = budget or NavigationBudget()
@@ -107,39 +150,46 @@ def collect_plan(queries, *, destination, target_listings=1000, budget=None, res
     identities, vins, outcomes = set(), set(), []
     summary = dict(queries=queries, started_utc=datetime.now(timezone.utc).isoformat(),
                    target_listings=target_listings, resumed_from=str(resume_from) if resume_from else None,
-                   national_coverage_verified=False, daily_sales_estimate=None)
+                   national_coverage_verified=False, daily_sales_estimate=None,
+                   freshness_note='Generic plan/resume is not a fresh daily cycle; use the explicit windowed cycle runner.')
     write_json_atomic(destination/'query_plan.json', dict(queries=queries))
     summary.update(outcomes=[], unique_listings=0, unique_vins=0, target_reached=False,
                    requests=0, all_queries_complete=False, observation_started_utc=None, observation_ended_utc=None)
     write_json_atomic(destination/'run_report.json', summary)
     observation_times = []
-    for q in queries:
-        name = q['query_id']
-        if name in previous:
-            entry = dict(previous[name], resumed=True)
-        elif ((target_listings is not None and len(identities) >= target_listings) or budget.stopped or budget.requests >= budget.max_requests
-              or time.monotonic() - budget.started >= budget.max_seconds):
-            entry = dict(query_id=name, query_complete=False, status='unattempted',
-                         reason='Target reached or shared request/access budget stopped')
-        else:
-            folder = destination/name
-            report = collect_search(filters=q['filters'], zip_code=q['zip_code'], destination=folder,
-                target_listings=None if full_plan else target_listings-len(identities), budget=budget, post=post,
-                location_filter=q.get('location_filter', False), known_listing_ids=identities)
-            entry = query_outcome(name, folder)
-        if 'database' in entry:
-            captures, rows = read_snapshots(entry['database'])
-            observation_times.extend(captures.loc[captures.status.eq('parsed'), 'observed_at_utc'].dropna())
-            if not rows.empty:
-                identities.update(zip(rows.retailer, rows.listing_id))
-                known_vins = rows.dropna(subset=['vin'])
-                vins.update(zip(known_vins.retailer, known_vins.vin))
-        outcomes.append(entry)
-        summary.update(outcomes=outcomes, unique_listings=len(identities), unique_vins=len(vins),
-            target_reached=target_listings is not None and len(identities)>=target_listings, requests=budget.requests-start_requests,
-            ended_utc=datetime.now(timezone.utc).isoformat(),
-            observation_started_utc=min(observation_times) if observation_times else None,
-            observation_ended_utc=max(observation_times) if observation_times else None,
-            all_queries_complete=len(outcomes)==len(queries) and all(r['query_complete'] for r in outcomes))
-        write_json_atomic(destination/'run_report.json', summary)
+    with search_transport(post) as send:
+        for q in queries:
+            name = q['query_id']
+            if name in previous:
+                entry = dict(previous[name], resumed=True)
+            elif ((target_listings is not None and len(identities) >= target_listings) or budget.stopped or budget.requests >= budget.max_requests
+                  or time.monotonic() - budget.started >= budget.max_seconds):
+                entry = dict(query_id=name, query_complete=False, status='unattempted',
+                             outcome_kind='unattempted', reason='Target reached or shared request/access budget stopped')
+            else:
+                folder = destination/name
+                report = collect_search(filters=q['filters'], zip_code=q['zip_code'], destination=folder,
+                    target_listings=None if full_plan else target_listings-len(identities), budget=budget, post=send,
+                    location_filter=q.get('location_filter', False), known_listing_ids=identities)
+                entry = query_outcome(name, folder)
+            if 'database' in entry:
+                captures, rows = read_snapshots(entry['database'])
+                admitted = json.loads(Path(entry['report']).read_text(encoding='utf-8'))
+                admitted_pages = {p['page'] for p in admitted['pages'] if p['status'] == 'parsed'}
+                captures = captures[captures.page_number.isin(admitted_pages)]
+                if not rows.empty:
+                    rows = rows[rows.page_number.isin(admitted_pages)]
+                observation_times.extend(captures.loc[captures.status.eq('parsed'), 'observed_at_utc'].dropna())
+                if not rows.empty:
+                    identities.update(zip(rows.retailer, rows.listing_id))
+                    known_vins = rows.dropna(subset=['vin'])
+                    vins.update(zip(known_vins.retailer, known_vins.vin))
+            outcomes.append(entry)
+            summary.update(outcomes=outcomes, unique_listings=len(identities), unique_vins=len(vins),
+                target_reached=target_listings is not None and len(identities)>=target_listings, requests=budget.requests-start_requests,
+                ended_utc=datetime.now(timezone.utc).isoformat(),
+                observation_started_utc=min(observation_times) if observation_times else None,
+                observation_ended_utc=max(observation_times) if observation_times else None,
+                all_queries_complete=len(outcomes)==len(queries) and all(r['query_complete'] for r in outcomes))
+            write_json_atomic(destination/'run_report.json', summary)
     return summary

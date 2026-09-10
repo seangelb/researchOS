@@ -125,12 +125,19 @@ def test_invalid_period_identities_block_absence_classification(problem):
 @pytest.mark.parametrize('key,value',[('isPurchasePending','false'),('isOnDemand',0),
     ('vehicleLockType','unknown'),('vehicleInventoryType',True),('transportCost',float('nan')),
     ('parentModel',42),('vehiclePurchaseType',1)])
-def test_import_rejects_native_type_drift(tmp_path,response_data,key,value):
-    from vehicle_tracker.history import import_reports
+def test_native_type_drift_is_rejected_before_coverage_and_not_imported(tmp_path,response_data,key,value):
+    from vehicle_tracker.history import import_reports, read_history
     response_data['inventory']['vehicles'][0][key]=value
     report=retained_query(tmp_path,response_data)
-    with pytest.raises(ValueError,match='native'):
-        import_reports([report],tmp_path/'analysis.sqlite')
+    outcome=json.loads(report.read_text())
+    assert not outcome['query_complete'] and outcome['unique_listings']==0
+    assert outcome['pages'][0]['outcome_kind']=='schema_failure'
+    assert outcome['pages'][0]['status']=='failed'
+    # Failure evidence remains importable, but it must not become inventory.
+    import_reports([report],tmp_path/'analysis.sqlite')
+    runs,captures,observations=read_history(tmp_path/'analysis.sqlite')
+    assert len(runs)==len(captures)==1 and observations.empty
+    assert not runs.query_complete.any()
 
 
 def test_import_closes_its_database_connection(tmp_path,response_data,monkeypatch):

@@ -1,10 +1,29 @@
 """Carvana public-page capture parsing. Pure functions: no network or writes."""
 from __future__ import annotations
 
+import math
 import re
 from urllib.parse import urlsplit
 
 import pandas as pd
+
+NATIVE_FIELDS = {'parent_model': 'parentModel', 'purchase_pending': 'isPurchasePending',
+    'vehicle_lock_type': 'vehicleLockType', 'purchase_type': 'vehiclePurchaseType',
+    'inventory_type': 'vehicleInventoryType', 'on_demand': 'isOnDemand', 'transport_cost_usd': 'transportCost'}
+
+
+def native_values(vehicle):
+    """Keep native nulls/types; reject schema drift instead of SQLite text coercion."""
+    values = {name: vehicle.get(key) for name, key in NATIVE_FIELDS.items()}
+    types = {'parent_model': (str,), 'purchase_pending': (bool,), 'vehicle_lock_type': (int,),
+             'purchase_type': (str,), 'inventory_type': (int,), 'on_demand': (bool,),
+             'transport_cost_usd': (int, float)}
+    for name, value in values.items():
+        if value is not None and (type(value) not in types[name] or
+                (name == 'transport_cost_usd' and not math.isfinite(value))):
+            raise ValueError('Unexpected native type/value: ' + name)
+    return values
+
 
 # Read only the rendered document. No cookies, tokens, private endpoints or JS execution
 # from the page's script contents. schema.org values remain distinct from card text.

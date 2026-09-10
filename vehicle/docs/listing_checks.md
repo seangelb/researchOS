@@ -4,6 +4,32 @@ Inventory observations, website checks, and analyst conclusions are three differ
 tables. The daily command and notebook 20 combine them at a chosen evidence cutoff.
 They do not turn a disappearing VIN or a website label into a confirmed sale.
 
+## Notebook entry without a JSON file
+
+Notebook 20 sections 5 and 6 now provide selection, an editable `CHECK_DRAFT`, and
+manual prepare/preview/save commands. Select all three identity fields from retained
+inventory, inspect the original URL, and enter the actual wording and check time.
+Use a console attached to the notebook kernel for the Markdown commands; leave
+them out of executable notebook cells. Ordinary Run All remains read-only.
+
+`prepare_check(observations, retailer=..., vin=..., listing_id=..., draft=...,
+available_at=...)` is pure: no requests, clock reads, or writes. It validates the
+draft against retained identity, rejects placeholders and synthetic source URIs,
+and returns a content-bound `prepared-...` ID. Availability is supplied once during
+preparation; it is not the time the page was physically checked.
+
+`record_evidence(settings, prepared_check, kind='check')` accepts that dictionary
+through the same locked validation/write path as the JSON command below. A changed
+prepared record must be prepared and previewed again. Replaying the unchanged
+record is idempotent. Saving updates the checks CSV and uses the existing local
+`cycle.lock`; it does not alter inventory, register a cycle, or export tables.
+Evidence references remain analyst-supplied: validation does not authenticate them.
+
+The VIN timeline retains separate physical visits and selects the latest correction
+to each visit at the cutoff. It shows gaps and derived absences separately from
+actual inventory/page observations. The full histories retain older versions.
+Alternative-cycle and synthetic notebook examples do not enable manual recording.
+
 ## 1. Check a listing and save the evidence
 
 Start with `detail_followups` in notebook 20. Open its original listing URL manually

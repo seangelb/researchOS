@@ -13,7 +13,8 @@ ROOT = Path(history_module.__file__).resolve().parents[3]
 spec = importlib.util.spec_from_file_location('daily_notebook_guards', ROOT / 'scripts/check_notebooks.py')
 checker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(checker)
-CELL_IDS = ['daily-cycle-data', 'daily-vin-analysis', 'sale-review-data',
+CELL_IDS = ['daily-operating-view', 'daily-cycle-data', 'daily-operating-tables',
+            'daily-vin-analysis', 'daily-asking-prices', 'daily-price-composition', 'daily-price-bridge', 'sale-review-data',
             'daily-synthetic-example', 'sale-review-example']
 
 
@@ -39,8 +40,9 @@ def execute_daily(monkeypatch, tmp_path, cycles=None, rows=None):
 
     monkeypatch.setattr(cycle_module, 'read_cycle_history', read_selected)
     selected = [tmp_path / 'explicit-cycle.json'] if cycles is not None else []
-    scope = dict(pd=pd, Path=Path, display=lambda *args: None, DATABASE=database,
-                 CYCLE_REPORTS_OVERRIDE=selected)
+    scope = dict(pd=pd, Path=Path, ROOT=VEHICLE, display=lambda *args: None,
+                 AS_OF_OVERRIDE='2026-09-08T13:00:00Z', DAILY_DATABASE_OVERRIDE=database,
+                 CYCLE_REPORTS_OVERRIDE=selected, RUN_TRACKING_VIEW_OVERRIDE=False)
     before = database.read_bytes()
     with checker.offline_guards():
         for identifier in CELL_IDS:
@@ -98,6 +100,7 @@ def test_daily_incomplete_cycle_exposes_unknown_absence(monkeypatch, tmp_path, t
     assert scope['daily_identity_join'].empty
     assert 'BLOCKED DAILY JOIN' in capsys.readouterr().out
     assert not scope['daily_comparison_allowed']
+    assert scope['asking_price_means'].empty and scope['price_change_counts'].empty
 
 
 def test_daily_synthetic_example_relisting_gap_and_missing_are_separate(monkeypatch, tmp_path):
@@ -113,9 +116,9 @@ def test_daily_synthetic_example_relisting_gap_and_missing_are_separate(monkeypa
     counts = scope['synthetic_summary']
     assert counts.skipped_days_before.iloc[2] == 1
     assert pd.isna(counts.persistent_absence.iloc[2])
-    assert counts.pending_cleared.iloc[1] == 1
+    assert counts.pending_started.iloc[1] == 1
     assert example.event_type.eq('persistent_absence').sum() == 1
-    assert example.event_type.iloc[-1] == 'reappeared'
+    assert example.event_type.iloc[-1] == 'relisted'
     assert example.reappeared_after_absence.iloc[-1]
     assert scope['example_candidates_before'].followup_state.tolist() == ['still_absent']
     assert scope['example_candidates_after'].followup_state.tolist() == ['reappeared']
@@ -156,6 +159,108 @@ def test_daily_notebook_withholds_invalid_daily_comparison(monkeypatch, tmp_path
     assert not scope['daily_comparison_allowed']
     assert scope['daily_identity_join'].empty
     assert scope['daily_change_counts'].empty
+    assert scope['asking_price_means'].empty
+    if problem == 'duplicate':
+        assert len(scope['identity_issues']) == 2
+
+
+def test_inventory_composition_moves_mean_without_matched_repricing(monkeypatch, tmp_path, two_cycle_rows):
+    days, rows = two_cycle_rows
+    rows['asking_price_usd'] = 20000
+    removed = rows.iloc[[0]].assign(vin='REMOVED', listing_id='removed', asking_price_usd=10000)
+    added = rows.iloc[[1]].assign(vin='ADDED', listing_id='added', asking_price_usd=30000)
+    scope = execute_daily(monkeypatch, tmp_path, days, pd.concat([rows, removed, added], ignore_index=True))
+    means = scope['asking_price_means'].set_index('sample')
+    assert means.mean_asking_price_usd.tolist() == [15000, 25000, 20000, 20000]
+    assert means.known_asking_prices.tolist() == [2, 2, 1, 1]
+    assert scope['price_change_counts'].matched_VINs.to_dict() == {
+        'unchanged': 1, 'cut': 0, 'increase': 0, 'unavailable': 0}
+    assert scope['composition_prices'].mean_asking_price_usd.tolist() == [30000, 10000]
+    assert scope['additions'].listing_id_after.tolist() == ['added']
+    assert scope['disappearances'].listing_id_before.tolist() == ['removed']
+    breakdown = scope['price_change_breakdown'].set_index('component').change_usd
+    assert breakdown['Common-sample repricing'] == 0
+    assert breakdown['inventory composition'] == 10000
+    assert breakdown['Total observed mean change'] == 10000
+    assert scope['reconciliation_difference'] == 0
+
+
+def test_matched_price_changes_missing_and_zero_denominators(monkeypatch, tmp_path, two_cycle_rows):
+    days, template = two_cycle_rows
+    parts = []
+    for vin, previous, current in [('CUT', 20000, 19500), ('UP', 10000, 11000),
+                                  ('MISSING', None, 12000), ('ZERO', 0, 0), ('NEGATIVE', -10, -8)]:
+        part = template.copy().assign(vin=vin)
+        part['listing_id'] = [vin + '-old', vin + '-new']
+        part['asking_price_usd'] = [previous, current]
+        parts.append(part)
+    scope = execute_daily(monkeypatch, tmp_path, days, pd.concat(parts, ignore_index=True))
+    changes = scope['matched_price_rows'].set_index('vin')
+    assert changes.loc['CUT', 'visible_asking_price_change_usd'] == -500
+    assert changes.loc['CUT', 'asking_price_change_pct'] == -2.5
+    assert changes.loc['UP', 'asking_price_change_pct'] == 10
+    assert changes.loc['MISSING', 'price_comparison'] == 'unavailable'
+    assert pd.isna(changes.loc['MISSING', 'visible_asking_price_change_usd'])
+    assert pd.isna(changes.loc['ZERO', 'asking_price_change_pct'])
+    assert changes.loc['ZERO', 'price_comparison'] == 'unchanged'
+    assert changes.loc['NEGATIVE', 'asking_price_usd_before'] == -10
+    assert changes.loc['CUT', 'listing_id_before'] == 'CUT-old'
+    assert changes.loc['CUT', 'listing_id_after'] == 'CUT-new'
+    means = scope['asking_price_means']
+    assert means.known_asking_prices.tolist() == [4, 5, 4, 4]
+    assert means.missing_asking_prices.tolist() == [1, 0, 0, 0]
+    assert scope['price_change_counts'].matched_VINs.to_dict() == {
+        'unchanged': 1, 'cut': 1, 'increase': 2, 'unavailable': 1}
+    assert not scope['all_prices_known']
+    assert 'composition plus price coverage' in scope['price_change_breakdown'].component.tolist()
+    assert scope['reconciliation_difference'] == pytest.approx(0)
+
+
+def test_price_bridge_separates_repricing_and_composition(monkeypatch, tmp_path, two_cycle_rows):
+    days, rows = two_cycle_rows  # One common VIN reprices from 20,000 to 19,500.
+    removed = rows.iloc[[0]].assign(vin='REMOVED', listing_id='removed', asking_price_usd=10000)
+    added = rows.iloc[[1]].assign(vin='ADDED', listing_id='added', asking_price_usd=30000)
+    scope = execute_daily(monkeypatch, tmp_path, days, pd.concat([rows, removed, added], ignore_index=True))
+    changes = scope['price_change_breakdown'].set_index('component').change_usd
+    assert changes['Common-sample repricing'] == -500
+    assert changes['inventory composition'] == 10250
+    assert changes['Total observed mean change'] == 9750
+    assert scope['price_bridge'].change_usd.sum() == 9750
+
+
+def test_price_bridge_is_unknown_without_common_priced_vehicles(monkeypatch, tmp_path, two_cycle_rows):
+    days, rows = two_cycle_rows
+    rows['vin'] = ['OLD', 'NEW']
+    scope = execute_daily(monkeypatch, tmp_path, days, rows)
+    assert scope['price_bridge'].empty and scope['price_change_breakdown'].empty
+    assert scope['asking_price_means'].known_asking_prices.tolist() == [1, 1, 0, 0]
+
+
+def test_irregular_windows_are_not_scaled_to_a_day(monkeypatch, tmp_path, two_cycle_rows, capsys):
+    days, rows = two_cycle_rows
+    days.loc[0, ['window_start', 'window_end', 'available_at']] = [
+        '2026-09-01T21:45:00Z', '2026-09-01T21:46:30Z', '2026-09-01T21:47:00Z']
+    days.loc[1, ['window_start', 'window_end', 'available_at']] = [
+        '2026-09-02T07:00:00Z', '2026-09-02T07:02:00Z', '2026-09-02T07:03:00Z']
+    rows['observed_at_utc'] = ['2026-09-01T21:46:00Z', '2026-09-02T07:01:00Z']
+    scope = execute_daily(monkeypatch, tmp_path, days, rows)
+    windows = scope['collection_windows']
+    assert windows.sweep_seconds.tolist() == [90, 120]
+    assert pd.isna(windows.hours_since_previous_start.iloc[0])
+    assert scope['interval_hours'] == 9.25
+    assert windows.timezone.tolist() == ['UTC', 'UTC']
+    assert windows.window_start_local.iloc[0] == '2026-09-01T21:45:00+00:00'
+    assert scope['matched_price_rows'].visible_asking_price_change_usd.tolist() == [-500]
+    assert 'not a measured 24-hour flow' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize('blank', ['', '   ', None])
+def test_invalid_identity_rows_are_visible_without_a_price_join(monkeypatch, tmp_path, two_cycle_rows, blank):
+    days, rows = two_cycle_rows
+    rows.loc[0, 'vin'] = blank
+    scope = execute_daily(monkeypatch, tmp_path, days, rows)
+    assert len(scope['identity_issues']) == 1
+    assert scope['daily_identity_join'].empty and scope['asking_price_means'].empty
 
 
 def run_page_cell(days, rows, checks, cutoff):
@@ -169,6 +274,7 @@ def run_page_cell(days, rows, checks, cutoff):
     scope = dict(pd=pd, display=lambda *args: None, tracking_tables=report,
         daily_source_rows=report['vehicle_observations'], saved_check_evidence=report['listing_checks'],
         CHECKS_OVERRIDE=checks.to_dict('records'), CHECK_COLUMNS=CHECK_COLUMNS,
+        check_history_input=checks,
         validate_checks=validate_checks, TRACKING_AS_OF=cutoff,
         daily_events=vin_events(known_days, known_rows))
     with checker.offline_guards():

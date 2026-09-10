@@ -127,7 +127,9 @@ def test_resume_skips_verified_complete_restarts_failed_without_overwriting(tmp_
     from vehicle_tracker.search_plan import collect_plan
     monkeypatch.setattr('vehicle_tracker.collect.time.sleep', lambda _: None)
     success=Mock(status_code=200,headers={'content-type':'application/json'},content=b'ok',json=Mock(return_value=response_data))
-    failure=Mock(status_code=503,headers={},content=b'failure')
+    invalid = copy.deepcopy(response_data)
+    invalid['inventory']['pagination']['totalMatchedPages'] = 2
+    failure=Mock(status_code=200,headers={'content-type':'application/json'},content=b'failure',json=Mock(return_value=invalid))
     plan=[dict(query_id=q,zip_code='08542',filters={}) for q in ('first','second')]
     initial=collect_plan(plan,destination=tmp_path/'initial',post=Mock(side_effect=[success,failure]))
     old_bytes=(tmp_path/'initial/run_report.json').read_bytes()
@@ -217,8 +219,10 @@ def test_overlapping_query_target_counts_new_ids_and_resume_makes_progress(tmp_p
     def response(data):
         return Mock(status_code=200,headers={'content-type':'application/json'},content=b'example',json=Mock(return_value=data))
     plan=[dict(query_id=q,zip_code='08542',filters={}) for q in ('first','second')]
+    changed_total = copy.deepcopy(new)
+    changed_total['inventory']['pagination']['totalMatchedInventory'] = 28
     limited=collect_plan(plan,destination=tmp_path/'limited',target_listings=6,
-        post=Mock(side_effect=[response(first),response(overlap),TimeoutError()]))
+        post=Mock(side_effect=[response(first),response(overlap),response(changed_total)]))
     assert limited['unique_listings']==3 and not limited['target_reached']
     post=Mock(side_effect=[response(overlap),response(new)])
     resumed=collect_plan(plan,destination=tmp_path/'resume',target_listings=6,

@@ -39,6 +39,10 @@ class NavigationBudget:
     def response_received(self):
         """In-memory budgets have no response checkpoint."""
 
+    def request_started(self):
+        """Anchor spacing to the actual send after any durable reservation writes."""
+        self.last_request = time.monotonic()
+
     def timeout_ms(self, limit=45000):
         remaining = self.max_seconds - (time.monotonic() - self.started)
         if remaining <= 0 or self.stopped:

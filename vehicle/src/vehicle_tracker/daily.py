@@ -1,8 +1,11 @@
 """One explicit daily inventory workflow using the existing cycle and history storage."""
+from contextlib import nullcontext
 from datetime import timedelta
 import hashlib
 import json
+import os
 from pathlib import Path
+import re
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -15,6 +18,51 @@ from vehicle_tracker.sales import CANDIDATE_COLUMNS, REVIEW_COLUMNS, sale_candid
 from vehicle_tracker.checks import (CHECK_COLUMNS, append_record, followup_queue, read_records,
     select_checks, select_reviews, validate_checks, validate_reviews, validate_check_identities)
 from vehicle_tracker.storage import write_json_atomic
+from vehicle_tracker.search_plan import require_safe_resume
+
+
+def _prepared_check_id(record):
+    content = {key: value for key, value in record.items() if key != 'check_id'}
+    return 'prepared-' + hashlib.sha256(json.dumps(content, sort_keys=True).encode('utf-8')).hexdigest()
+
+
+def _validated_check_record(record):
+    """The notebook and JSON entry points use the same structural/entry checks."""
+    validated = validate_checks(pd.DataFrame([record])).iloc[0].to_dict()
+    for field, value in validated.items():
+        text = value.strip().casefold()
+        if text in {'...', 'todo', 'tbd', 'replace me', 'your name'} or (text.startswith('<') and text.endswith('>')):
+            raise ValueError('Replace the placeholder in ' + field)
+    if validated['source'].strip().casefold().startswith('synthetic://'):
+        raise ValueError('Synthetic evidence cannot be recorded in the daily history')
+    native = validated['native_text']
+    without_boilerplate = re.sub(r'\bas\s+originally\s+sold\b', '', native, flags=re.IGNORECASE)
+    if (validated['observed_status'] == 'sold_label' and native != without_boilerplate
+            and not re.search(r'\bsold\b', without_boilerplate, flags=re.IGNORECASE)):
+        raise ValueError('Generic equipment wording "as originally sold" is not a listing Sold label')
+    if validated['check_id'].startswith('prepared-') and validated['check_id'] != _prepared_check_id(validated):
+        raise ValueError('Prepared check changed; prepare and preview the edited record again')
+    return validated
+
+
+def prepare_check(observations, *, retailer, vin, listing_id, draft, available_at):
+    """Pure preview: explicit retained identity, actual check time, and fixed availability.
+
+    The draft contains checked_at, observed_status, native_text, source, reviewer,
+    and note. The caller supplies availability once; this function reads no clock
+    and writes nothing. Repeating identical normalized inputs yields the same ID.
+    The eventual save rechecks the identity against registered inventory evidence.
+    """
+    fields = {'checked_at', 'observed_status', 'native_text', 'source', 'reviewer', 'note'}
+    if not isinstance(draft, dict) or set(draft) != fields:
+        raise ValueError('Draft requires exactly: ' + ', '.join(sorted(fields)))
+    if observations.empty:
+        raise ValueError('Select an identity from retained inventory first; history is empty')
+    record = _validated_check_record(dict(check_id='draft', retailer=retailer, vin=vin,
+        listing_id=listing_id, available_at=available_at, **draft))
+    validate_check_identities(pd.DataFrame([record]), observations)
+    record['check_id'] = _prepared_check_id(record)
+    return record
 
 
 def digest(path):
@@ -72,6 +120,60 @@ def registered_cycles(settings):
         if report_paths != set(row['reports']) or any(digest(report) != sha for report, sha in row['reports'].items()):
             raise ValueError('Registered query evidence changed or is missing')
     return entries
+
+
+def recovery_candidates(settings, *, now=None):
+    """Read-only discovery of unregistered cycles; this never resumes a request."""
+    now = now or utcnow()
+    entries = registered_cycles(settings)
+    selected = {entry['path'] for entry in entries}
+    registered_dates = {entry['cycle_date'] for entry in entries}
+    candidates = []
+    for folder in sorted(settings['capture_root'].glob('*')):
+        if not folder.is_dir():
+            continue
+        path = folder / 'cycle.json'
+        if not path.is_file() and not re.fullmatch(r'\d{4}-\d{2}-\d{2}', folder.name):
+            continue
+        if str(path.resolve()) in selected:
+            continue
+        row = dict(path=str(path.resolve()), import_allowed=False, live_resume_allowed=False)
+        try:
+            state, coverage, reports = cycle_evidence(path)
+            retained_stop = None
+            for report in reports:
+                try:
+                    require_safe_resume(json.loads(report.read_text(encoding='utf-8')))
+                except ValueError as error:
+                    retained_stop = str(error)
+                    break
+            matches = state['queries'] == settings['queries'] and state['timezone'] == settings['timezone']
+            date_selected = state['cycle_date'] in registered_dates
+            row.update(cycle_date=state['cycle_date'], coverage_complete=state['coverage_complete'],
+                       requests=state['budget']['requests'], import_allowed=matches and not date_selected)
+            elapsed = (now - _aware(state['created_at'])).total_seconds()
+            reason = ('Settings population or timezone differs' if not matches else
+                'Date already registered with different evidence; review only' if date_selected else
+                'Complete retained cycle; no requests needed' if state['coverage_complete'] else
+                'Previous request outcome uncertain; live resume blocked' if state['budget']['pending_request'] else
+                'Access or transport stop; live resume blocked' if state['budget']['stopped'] else
+                retained_stop if retained_stop else
+                'Settings limits differ; live resume blocked' if any(state[key] != settings[key] for key in ['max_requests', 'max_seconds']) else
+                'Completed query is outside the frozen window; live resume blocked' if (
+                    coverage.query_complete.eq(1) & ~coverage.within_window).any() else
+                'Observation window expired or clock changed; live resume blocked' if not (
+                    0 <= elapsed < state['max_seconds'] and _aware(state['window_start']) <= now < _aware(state['window_end'])) else
+                'Current clock precedes the last request; live resume blocked' if (
+                    state['budget']['last_request_utc'] and now < _aware(state['budget']['last_request_utc'])) else
+                'Request budget exhausted; live resume blocked' if state['budget']['requests'] >= state['max_requests'] else
+                None)
+            row['live_resume_allowed'] = reason is None
+            row['reason'] = reason or 'Incomplete retained cycle; explicit identical-window resume may be possible'
+            row['offline_action'] = f'--import-cycle "{path.resolve()}"' if row['import_allowed'] else 'Review the retained cycle with its original settings'
+        except (ValueError, OSError, KeyError, TypeError) as error:
+            row.update(reason='Retained cycle validation failed: ' + str(error), offline_action='Review retained evidence; do not recollect into this folder')
+        candidates.append(row)
+    return candidates
 
 
 def tracking_history(settings, *, as_of):
@@ -166,10 +268,12 @@ def tracking_report(settings, *, as_of, checks=None, reviews=None):
 
 
 def record_evidence(settings, record_path, *, kind):
-    """Record one explicit JSON input; validate against retained history before writing CSV."""
+    """Record explicit JSON or a prepared dictionary using the same locked write path."""
     if kind not in {'check', 'review'}:
         raise ValueError('Record kind must be check or review')
-    record = json.loads(Path(record_path).read_text(encoding='utf-8-sig'))
+    record = dict(record_path) if isinstance(record_path, dict) else json.loads(Path(record_path).read_text(encoding='utf-8-sig'))
+    if kind == 'check':
+        record = _validated_check_record(record)
     supplied = (validate_checks if kind == 'check' else validate_reviews)(pd.DataFrame([record]))
     available = supplied.available_at.iloc[0]
     if _aware(available) > utcnow():
@@ -187,6 +291,14 @@ def record_evidence(settings, record_path, *, kind):
 def register_cycle(settings, cycle_path):
     """Import retained evidence and append its explicit date selection; caller owns lock."""
     path = Path(cycle_path).resolve()
+    # A collector may be invoked separately from the daily command. Bind evidence
+    # only while its cycle is idle; a crash releases both operating-system locks.
+    lock = nullcontext() if path.parent == settings['register'].parent.resolve() else cycle_lock(path.parent)
+    with lock:
+        return _register_cycle(settings, path)
+
+
+def _register_cycle(settings, path):
     state, _, reports = cycle_evidence(path)
     if state['queries'] != settings['queries'] or state['timezone'] != settings['timezone']:
         raise ValueError('Cycle population differs from daily tracking settings')
@@ -207,18 +319,23 @@ def register_cycle(settings, cycle_path):
 def export_tracking(settings, *, as_of):
     tables = tracking_report(settings, as_of=as_of)
     folder = settings['exports'] / (utcnow().strftime('%Y%m%dT%H%M%SZ') + '-' + uuid4().hex[:8])
-    folder.mkdir(parents=True, exist_ok=False)
+    staging = folder.with_name('.' + folder.name + '.partial')
+    staging.mkdir(parents=True, exist_ok=False)
     for name, table in tables.items():
-        table.to_csv(folder / (name + '.csv'), index=False)
+        with (staging / (name + '.csv')).open('w', encoding='utf-8', newline='') as stream:
+            table.to_csv(stream, index=False)
+            stream.flush()
+            os.fsync(stream.fileno())
     files = [settings['config_path'], settings['plan'], settings['register'], settings['checks'], settings['reviews'],
              *sorted(Path(__file__).parent.glob('*.py'))]
     if settings['database'].is_file():
         files.append(settings['database'])
-    write_json_atomic(folder / 'manifest.json', dict(as_of=as_of,
+    write_json_atomic(staging / 'manifest.json', dict(as_of=as_of,
         sources={str(path): digest(path) for path in files if path.is_file()},
         review_inputs={str(path): digest(path) if path.is_file() else None for path in [settings['checks'], settings['reviews']]},
-        outputs={path.name: digest(path) for path in sorted(folder.glob('*.csv'))},
+        outputs={path.name: digest(path) for path in sorted(staging.glob('*.csv'))},
         interpretation='Fixed pilot scope. Sold labels and sales estimates remain unavailable.'))
+    staging.rename(folder)  # Publish the complete CSV set and manifest together.
     return folder, tables
 
 
@@ -227,8 +344,10 @@ def run_tracking(settings, *, live=False, import_path=None, refresh=False, post=
     if sum(bool(action) for action in [live, import_path, refresh]) > 1:
         raise ValueError('Select only one action: live, import or refresh')
     if not any([live, import_path, refresh]):
-        registered_cycles(settings)
-        return preview(settings), None, None
+        config = preview(settings)
+        config['recovery_candidates'] = recovery_candidates(settings)
+        config['incomplete_exports'] = [str(path) for path in sorted(settings['exports'].glob('.*.partial'))]
+        return config, None, None
     settings['register'].parent.mkdir(parents=True, exist_ok=True)
     with cycle_lock(settings['register'].parent):
         entries = registered_cycles(settings)
@@ -237,6 +356,8 @@ def run_tracking(settings, *, live=False, import_path=None, refresh=False, post=
             config = preview(settings)
             if any(entry['cycle_date'] == config['cycle_date'] for entry in entries):
                 raise ValueError('Today is already registered; no second collection was started')
+            if Path(config['destination']).exists():
+                raise ValueError('Retained daily destination already exists; preview recovery candidates or use --import-cycle. No collection started')
             # Check old selected evidence before collecting anything new.
             tracking_history(settings, as_of=utcnow().isoformat())
             state = collect_cycle(settings['queries'], destination=config['destination'],

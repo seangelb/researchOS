@@ -15,7 +15,7 @@ import pandas as pd
 from vehicle_tracker.collect import NavigationBudget, CollectionStopped
 from vehicle_tracker.history import OBSERVATION_COLUMNS, import_reports, read_history, read_query_evidence
 from vehicle_tracker.search import ENDPOINT
-from vehicle_tracker.search_plan import collect_plan, query_outcome, validate_plan
+from vehicle_tracker.search_plan import collect_plan, query_outcome, require_safe_resume, validate_plan
 from vehicle_tracker.storage import write_json_atomic
 
 
@@ -48,6 +48,28 @@ def cycle_config(queries, *, cycle_date, timezone_name, window_start, window_end
                 scope_id=hashlib.sha256(json.dumps(scope,sort_keys=True).encode()).hexdigest(), queries=queries)
 
 
+def _cycle_state(path):
+    """Validate the frozen configuration and durable reservation before using either."""
+    state = json.loads(Path(path).read_text(encoding='utf-8'))
+    config = cycle_config(state['queries'], cycle_date=state['cycle_date'], timezone_name=state['timezone'],
+        window_start=state['window_start'], window_end=state['window_end'],
+        max_requests=state['max_requests'], max_seconds=state['max_seconds'])
+    if any(state[key] != value for key, value in config.items()):
+        raise ValueError('Cycle configuration or scope fingerprint changed')
+    saved = state['budget']
+    if (type(saved['requests']) is not int or not 0 <= saved['requests'] <= state['max_requests']
+            or type(saved['stopped']) is not bool or type(saved['pending_request']) is not bool
+            or bool(saved['requests']) != bool(saved['last_request_utc'])
+            or (saved['pending_request'] and not saved['requests'])):
+        raise ValueError('Invalid durable cycle budget; retained evidence requires review')
+    created = aware(state['created_at'])
+    if not aware(state['window_start']) <= created < aware(state['window_end']):
+        raise ValueError('Cycle creation is outside its frozen observation window')
+    if saved['last_request_utc'] and aware(saved['last_request_utc']) < created:
+        raise ValueError('Invalid durable request clock; retained evidence requires review')
+    return state
+
+
 @contextmanager
 def cycle_lock(directory):
     """OS lock is released on process exit, including a crash; no stale-lock deletion."""
@@ -69,23 +91,28 @@ class CycleBudget(NavigationBudget):
     """The existing sequential budget, persisted before transport across attempts."""
     def __init__(self, path):
         self.path = Path(path)
-        state = json.loads(self.path.read_text(encoding='utf-8'))
+        state = _cycle_state(self.path)
         saved = state['budget']
         if saved['pending_request']:
             raise ValueError('Previous request outcome uncertain; cycle cannot retry automatically')
         if saved['stopped']:
             raise ValueError('Cycle stopped after an access/transport failure')
         self.max_requests = state['max_requests']
-        elapsed = (utcnow()-aware(state['created_at'])).total_seconds()
+        now = utcnow()
+        elapsed = (now-aware(state['created_at'])).total_seconds()
+        if elapsed < 0 or (saved['last_request_utc'] and aware(saved['last_request_utc']) > now):
+            raise ValueError('Current clock precedes the durable cycle budget; cannot resume')
         self.max_seconds = min(state['max_seconds'],(aware(state['window_end'])-aware(state['created_at'])).total_seconds())
         self.started = time.monotonic()-elapsed
         self.requests, self.stopped, self.pause_seconds = saved['requests'], False, 3
-        self.last_request = (time.monotonic()-(utcnow()-aware(saved['last_request_utc'])).total_seconds()
+        self.last_request = (time.monotonic()-(now-aware(saved['last_request_utc'])).total_seconds()
                              if saved['last_request_utc'] else None)
         self.last_request_utc = saved['last_request_utc']
 
-    def save(self, pending=False):
+    def save(self, pending=None):
         state = json.loads(self.path.read_text(encoding='utf-8'))
+        if pending is None:
+            pending = state['budget']['pending_request']
         state['budget'] = dict(requests=self.requests, stopped=self.stopped,
                                pending_request=pending, last_request_utc=self.last_request_utc)
         write_json_atomic(self.path,state)
@@ -95,8 +122,14 @@ class CycleBudget(NavigationBudget):
         self.last_request_utc = utcnow().isoformat()
         self.save(pending=True)  # An interrupted/uncertain request remains reserved.
 
+    def request_started(self):
+        super().request_started()
+        self.last_request_utc = utcnow().isoformat()
+        # Reservation is already durable. Persist this actual start only when
+        # acknowledging the response; no filesystem delay belongs before transport.
+
     def response_received(self):
-        self.save()
+        self.save(pending=False)
 
     def stop(self):
         self.stopped = True
@@ -106,14 +139,9 @@ class CycleBudget(NavigationBudget):
 def cycle_evidence(path, *, as_of=None):
     """Return cycle metadata, every requested query's coverage, and all attempt reports."""
     path = Path(path).resolve()
-    state = json.loads(path.read_text(encoding='utf-8'))
+    state = _cycle_state(path)
     cutoff = aware(as_of) if as_of is not None else None
-    config = cycle_config(state['queries'],cycle_date=state['cycle_date'],timezone_name=state['timezone'],
-        window_start=state['window_start'],window_end=state['window_end'],
-        max_requests=state['max_requests'],max_seconds=state['max_seconds'])
-    if any(state[key] != value for key,value in config.items()):
-        raise ValueError('Cycle configuration or scope fingerprint changed')
-    selected, reports = {}, []
+    selected, reports, reported_requests = {}, [], 0
     for index, attempt in enumerate(state['attempts'], 1):
         if attempt != f'attempt_{index:04d}':
             raise ValueError('Invalid cycle attempt path')
@@ -122,11 +150,19 @@ def cycle_evidence(path, *, as_of=None):
             if not report.is_file():
                 continue
             native = json.loads(report.read_text(encoding='utf-8'))
+            if 'requests' in native:
+                if type(native['requests']) is not int or native['requests'] < 0:
+                    raise ValueError('Invalid retained query request count')
+                reported_requests += native['requests']
             # A later retry must not revise a result available at an earlier cutoff.
             if cutoff and (not native.get('ended_utc') or aware(native['ended_utc']) > cutoff):
                 continue
-            run, _, _ = read_query_evidence(report)
+            run, captures, _ = read_query_evidence(report)
+            availability = captures['evidence_available_at_utc'].dropna().tolist() if 'evidence_available_at_utc' in captures else []
+            run['evidence_available_at_utc'] = max(map(aware, availability)).isoformat() if availability else None
             if cutoff and run['observation_end'] and aware(run['observation_end']) > cutoff:
+                continue
+            if cutoff and run['evidence_available_at_utc'] and aware(run['evidence_available_at_utc']) > cutoff:
                 continue
             if (native['filters'] != query['filters'] or native['zip_code'] != query['zip_code']
                     or native.get('location_filter',False) != query.get('location_filter',False)):
@@ -134,6 +170,8 @@ def cycle_evidence(path, *, as_of=None):
             reports.append(report)
             if query['query_id'] not in selected or not selected[query['query_id']]['query_complete']:
                 selected[query['query_id']] = dict(run,report_path=str(report))
+    if state['budget']['requests'] < reported_requests:
+        raise ValueError('Durable cycle budget understates retained query requests')
     coverage = []
     for query in state['queries']:
         run = selected.get(query['query_id'],{})
@@ -150,7 +188,7 @@ def cycle_evidence(path, *, as_of=None):
     state['coverage_reason'] = ('Complete requested daily scope' if state['coverage_complete'] else
                                '; '.join(coverage.loc[~coverage.coverage_complete,'reason'].unique()))
     clocks = [state['created_at']] + [run[key] for run in selected.values()
-        for key in ('observation_end','invocation_end') if run.get(key)]
+        for key in ('observation_end','invocation_end','evidence_available_at_utc') if run.get(key)]
     state['available_at'] = max(map(aware,clocks)).isoformat()
     return state, coverage, reports
 
@@ -168,7 +206,7 @@ def collect_cycle(queries, *, destination, cycle_date, timezone_name, window_sta
     path = directory/'cycle.json'
     with cycle_lock(directory):
         if resume:
-            state, coverage, _ = cycle_evidence(path)
+            state, coverage, reports = cycle_evidence(path)
             if any(state[key] != value for key,value in config.items()):
                 raise ValueError('Resume requires identical date, window, plan and limits')
             if state['coverage_complete']:
@@ -180,6 +218,10 @@ def collect_cycle(queries, *, destination, cycle_date, timezone_name, window_sta
         if not aware(config['window_start']) <= utcnow() < aware(config['window_end']):
             raise ValueError('Current time is outside the requested daily observation window')
         budget = CycleBudget(path)
+        if resume:
+            # A damaged budget flag cannot erase retained access/transport evidence.
+            for report in reports:
+                require_safe_resume(json.loads(report.read_text(encoding='utf-8')))
         if budget.requests >= budget.max_requests:
             raise ValueError('Cycle request budget exhausted')
         budget.timeout_ms()

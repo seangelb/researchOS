@@ -1,0 +1,63 @@
+{
+  "cohort_id": "carvana-sale-pilot-20260909",
+  "selected_at": "2026-09-09T11:40:06.366543+00:00",
+  "baseline_source": "data/experiments/carvana_sale_signals/2026-09-09/observations.json",
+  "vehicles": [
+    {
+      "retailer": "carvana",
+      "vin": "5YJ3E1EAXPF590130",
+      "listing_id": "4632932",
+      "url": "https://www.carvana.com/vehicle/4632932",
+      "role": "prospective_inventory",
+      "selection_reason": "First absence from the registered daily pilot; last observed in inventory at 2026-09-09T01:44:16.996205+00:00."
+    },
+    {
+      "retailer": "carvana",
+      "vin": "1C4AJWAG5GL241979",
+      "listing_id": "4465259",
+      "url": "https://www.carvana.com/vehicle/4465259",
+      "role": "historical_control",
+      "selection_reason": "Public search-discovered Sold control outside the pilot; also says This vehicle is no longer available."
+    },
+    {
+      "retailer": "carvana",
+      "vin": "5YJ3E1EA0LF611240",
+      "listing_id": "4640427",
+      "url": "https://www.carvana.com/vehicle/4640427",
+      "role": "prospective_inventory",
+      "selection_reason": "Pending control from the prior page study; also says Another customer started purchasing this vehicle."
+    },
+    {
+      "retailer": "carvana",
+      "vin": "5YJ3E1EA4MF081629",
+      "listing_id": "4678187",
+      "url": "https://www.carvana.com/vehicle/4678187",
+      "role": "historical_control",
+      "selection_reason": "Older research candidate, previously pending in the 2026-09-08T11:34:10.965975+00:00 capture; not a registered daily disappearance."
+    },
+    {
+      "retailer": "carvana",
+      "vin": "5YJ3E1EA0LF632279",
+      "listing_id": "4681095",
+      "url": "https://www.carvana.com/vehicle/4681095",
+      "role": "prospective_inventory",
+      "selection_reason": "Available control from the prior page study; button was not clicked."
+    },
+    {
+      "retailer": "carvana",
+      "vin": "5YJ3E1EA0LF784711",
+      "listing_id": "4671091",
+      "url": "https://www.carvana.com/vehicle/4671091",
+      "role": "prospective_inventory",
+      "selection_reason": "Pre-order control from the prior page study; page also says Inspection in progress."
+    },
+    {
+      "retailer": "carvana",
+      "vin": "WBXHT3C33J5L30739",
+      "listing_id": "4436696",
+      "url": "https://www.carvana.com/vehicle/4436696",
+      "role": "historical_control",
+      "selection_reason": "Second public search-discovered Sold control outside the pilot; also says This vehicle is no longer available."
+    }
+  ]
+}

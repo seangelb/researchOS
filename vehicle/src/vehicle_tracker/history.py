@@ -1,18 +1,15 @@
 """Retained search evidence -> a separate SQLite history and explicit comparisons."""
 import hashlib
 from contextlib import closing
+from datetime import datetime, timezone
 import json
-import math
 from pathlib import Path
 import sqlite3
 
 import pandas as pd
 
-from vehicle_tracker.carvana import parse_capture
+from vehicle_tracker.carvana import NATIVE_FIELDS, native_values, parse_capture
 
-NATIVE_FIELDS = {'parent_model': 'parentModel', 'purchase_pending': 'isPurchasePending',
-    'vehicle_lock_type': 'vehicleLockType', 'purchase_type': 'vehiclePurchaseType',
-    'inventory_type': 'vehicleInventoryType', 'on_demand': 'isOnDemand', 'transport_cost_usd': 'transportCost'}
 OBSERVATION_COLUMNS = ['retailer', 'listing_id', 'vin', 'observed_at_utc', 'year', 'make', 'model',
     'mileage_miles', 'asking_price_usd', 'condition_native', 'availability_native', 'card_text',
     'listing_url', 'source_url', *NATIVE_FIELDS, 'capture_id', 'run_id']
@@ -21,10 +18,11 @@ CREATE TABLE IF NOT EXISTS query_runs (
  run_id TEXT PRIMARY KEY, report_path TEXT, report_sha256 TEXT, context_json TEXT,
  query_complete INTEGER, coverage_reason TEXT, reported_total INTEGER, stored_rows INTEGER,
  observation_start TEXT, observation_end TEXT, invocation_start TEXT, invocation_end TEXT,
- normalizer_sha256 TEXT, original_normalizer_sha256 TEXT);
+ normalizer_sha256 TEXT, original_normalizer_sha256 TEXT, imported_at_utc TEXT);
 CREATE TABLE IF NOT EXISTS captures (
  capture_id TEXT PRIMARY KEY, run_id TEXT REFERENCES query_runs(run_id), page INTEGER,
- observed_at_utc TEXT, status TEXT, row_count INTEGER, error TEXT, source_path TEXT);
+ observed_at_utc TEXT, status TEXT, row_count INTEGER, error TEXT, source_path TEXT,
+ evidence_available_at_utc TEXT);
 CREATE TABLE IF NOT EXISTS observations (
  retailer TEXT, listing_id TEXT, vin TEXT, observed_at_utc TEXT, year INTEGER, make TEXT, model TEXT,
  mileage_miles INTEGER, asking_price_usd REAL, condition_native TEXT, availability_native TEXT,
@@ -42,17 +40,33 @@ def file_hash(path):
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def native_values(vehicle):
-    """Keep native nulls/types; reject schema drift instead of SQLite text coercion."""
-    values = {name: vehicle.get(key) for name, key in NATIVE_FIELDS.items()}
-    types = {'parent_model': (str,), 'purchase_pending': (bool,), 'vehicle_lock_type': (int,),
-             'purchase_type': (str,), 'inventory_type': (int,), 'on_demand': (bool,),
-             'transport_cost_usd': (int, float)}
-    for name, value in values.items():
-        if value is not None and (type(value) not in types[name] or
-                (name == 'transport_cost_usd' and not math.isfinite(value))):
-            raise ValueError('Unexpected native type/value: ' + name)
-    return values
+def _verify_capture_metadata(page, capture):
+    """A new attempt's report and retained capture must describe the same response."""
+    if (not isinstance(page.get('attempt_id'), str) or not page['attempt_id']
+            or page['attempt_id'] != capture.get('attempt_id')):
+        raise ValueError('Attempt identity differs between query report and retained capture')
+    evidence = capture.get('response_evidence')
+    if page.get('response_evidence') != evidence:
+        raise ValueError('Response evidence differs between query report and retained capture')
+    if evidence is None:
+        if (page['status'] == 'parsed' or page.get('response_received_at_utc') is not None
+                or capture.get('captured_at_utc') is not None):
+            raise ValueError('Recorded response lacks its response evidence binding')
+        return  # Failed transport: no source observation clock can be inferred.
+    for page_key, evidence_key in [('response_sha256', 'response_content_sha256'),
+                                  ('response_bytes', 'response_content_bytes'),
+                                  ('response_hash_scope', 'response_hash_scope')]:
+        if page.get(page_key) != evidence.get(evidence_key):
+            raise ValueError('Response metadata differs between query report and retained capture')
+    try:
+        received = pd.Timestamp(page.get('response_received_at_utc'))
+        observed = pd.Timestamp(capture.get('captured_at_utc'))
+        valid = (not pd.isna(received) and received.tzinfo is not None
+                 and not pd.isna(observed) and observed.tzinfo is not None and received == observed)
+    except (TypeError, ValueError):
+        valid = False
+    if not valid:
+        raise ValueError('Response clocks differ between query report and retained capture')
 
 
 def read_query_evidence(report_path):
@@ -65,14 +79,38 @@ def read_query_evidence(report_path):
     report = json.loads(report_path.read_text(encoding='utf-8'))
     frames, captures, contexts, totals, page_ends = [], [], [], [], []
     for page in report['pages']:
+        if not page.get('retained_source'):
+            raise ValueError('Incomplete query checkpoint lacks retained source; review or recover before importing')
         source = Path(page['retained_source'])
         source_hash = file_hash(source)
         if source_hash != page['source_sha256']:
             raise ValueError('Retained source hash differs from the query report')
         capture = json.loads(source.read_text(encoding='utf-8'))
+        if report.get('evidence_contract') == 'carvana-search-source-v1':
+            _verify_capture_metadata(page, capture)
+        if 'response_evidence' in capture:
+            from vehicle_tracker.search_evidence import verify_response_evidence
+            retained_response = verify_response_evidence(capture['response_evidence'])
+            if page['status'] == 'parsed':
+                from vehicle_tracker.search import project_response
+                if (retained_response is None or capture['response_evidence'].get('redacted_values', 0)
+                        or capture['response_evidence'].get('ambiguous_json', False)):
+                    raise ValueError('Parsed page lacks replayable response evidence')
+                replayed = project_response(retained_response, capture['request'],
+                                            observed_at=capture['captured_at_utc'])
+                if any(capture.get(key) != value for key, value in replayed.items()):
+                    raise ValueError('Retained projection differs from response evidence replay')
+        available_at = page.get('evidence_available_at_utc')
+        if available_at is not None:
+            available, observed = pd.Timestamp(available_at), pd.Timestamp(capture.get('captured_at_utc'))
+            if (pd.isna(available) or available.tzinfo is None
+                    or (pd.isna(observed) and page['status'] == 'parsed')
+                    or (not pd.isna(observed) and (observed.tzinfo is None or available < observed))):
+                raise ValueError('Evidence availability must follow its observation clock')
         captures.append(dict(capture_id=source_hash, run_id=report['run_id'], page=page['page'],
             observed_at_utc=capture.get('captured_at_utc'), status=page['status'],
-            row_count=page['stored_rows'], error=page.get('error'), source_path=str(source)))
+            row_count=page['stored_rows'], error=page.get('error'), source_path=str(source),
+            evidence_available_at_utc=available_at))
         if page['status'] != 'parsed':
             continue
         frame = parse_capture(capture)
@@ -93,7 +131,7 @@ def read_query_evidence(report_path):
         frames.append(pd.concat([frame.reset_index(drop=True), native], axis=1)
                       .assign(capture_id=source_hash, run_id=report['run_id']))
     observations = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=OBSERVATION_COLUMNS)
-    capture_rows = pd.DataFrame(captures, columns=['capture_id','run_id','page','observed_at_utc','status','row_count','error','source_path'])
+    capture_rows = pd.DataFrame(captures, columns=['capture_id','run_id','page','observed_at_utc','status','row_count','error','source_path','evidence_available_at_utc'])
     if len(set(contexts)) > 1 or len(observations) != report.get('unique_listings', len(observations)):
         raise ValueError('Query context or admitted row count changed')
     parsed = capture_rows[capture_rows.status.eq('parsed')]
@@ -107,7 +145,8 @@ def read_query_evidence(report_path):
             or len(set(totals)) != 1 or len(observations) != totals[0]
             or report['reported_total'] != totals[0] or len(parsed) != max(1,page_ends[-1])):
         raise ValueError('Claimed complete query does not reconcile to retained evidence')
-    code = ''.join(file_hash(Path(__file__).parent/name) for name in ('history.py','search.py','carvana.py'))
+    code = ''.join(file_hash(Path(__file__).parent/name)
+                   for name in ('history.py', 'search.py', 'search_evidence.py', 'carvana.py'))
     run = dict(run_id=report['run_id'], report_path=str(report_path), report_sha256=file_hash(report_path),
         context_json=contexts[0] if contexts else None, query_complete=int(complete),
         coverage_reason=report.get('reason') or ('Complete retained query' if complete else 'Incomplete attempt'),
@@ -121,7 +160,12 @@ def read_query_evidence(report_path):
 
 
 def import_reports(report_paths, database):
-    """Idempotent import into the caller's explicit analysis DB; sources stay read-only."""
+    """Replay first, then import one atomic batch; an identical import changes no rows.
+
+    Retrying after an interrupted import checks the stored rows, not only report
+    hashes. Conflicting evidence requires a separate reviewed analysis build.
+    """
+    evidence = [(Path(path), read_query_evidence(path)) for path in report_paths]
     database = Path(database)
     database.parent.mkdir(parents=True, exist_ok=True)
     results = []
@@ -130,34 +174,70 @@ def import_reports(report_paths, database):
         if tables - {'query_runs','captures','observations'}:
             raise ValueError('Refusing an unrelated database')
         connection.execute('PRAGMA foreign_keys=ON')
-        connection.executescript(SCHEMA)
-        for report_path in report_paths:
-            run, captures, observations = read_query_evidence(report_path)
-            prior = connection.execute('SELECT report_sha256 FROM query_runs WHERE run_id=?', (run['run_id'],)).fetchone()
-            if prior and prior[0] != run['report_sha256']:
-                raise ValueError('Previously imported query report changed; use a new reviewed analysis build')
-            if not prior:
-                with connection:
-                    connection.execute('INSERT INTO query_runs VALUES ('+','.join('?' for _ in run)+')',tuple(run.values()))
+        with connection:
+            connection.execute('BEGIN IMMEDIATE')
+            for statement in SCHEMA.split(';'):
+                if statement.strip():
+                    connection.execute(statement)
+            # Add only provenance fields on an explicit import. Historical values
+            # remain NULL; neither observation nor prior import clocks are invented.
+            for table, column in [('query_runs', 'imported_at_utc'), ('captures', 'evidence_available_at_utc')]:
+                columns = {row[1] for row in connection.execute('PRAGMA table_info('+table+')')}
+                if column not in columns:
+                    connection.execute('ALTER TABLE '+table+' ADD COLUMN '+column+' TEXT')
+            for report_path, (run, captures, observations) in evidence:
+                prior = connection.execute('SELECT report_sha256 FROM query_runs WHERE run_id=?', (run['run_id'],)).fetchone()
+                if prior:
+                    if prior[0] != run['report_sha256']:
+                        raise ValueError('Previously imported query report changed; use a new reviewed analysis build')
+                    # Parser-code provenance records the original import. Replaying
+                    # with today's parser must agree with those stored observations.
+                    expected_run = {key: value for key, value in run.items()
+                                    if key not in {'normalizer_sha256', 'report_path'}}
+                    _verify_imported_rows(connection, 'query_runs', pd.DataFrame([expected_run]),
+                                          run['run_id'], ['run_id'])
+                    _verify_imported_rows(connection, 'captures', captures, run['run_id'], ['capture_id'])
+                    _verify_imported_rows(connection, 'observations', observations,
+                                          run['run_id'], ['capture_id', 'retailer', 'listing_id'])
+                else:
+                    imported_run = dict(run, imported_at_utc=datetime.now(timezone.utc).isoformat())
+                    connection.execute('INSERT INTO query_runs ('+','.join(imported_run)+') VALUES ('+
+                                       ','.join('?' for _ in imported_run)+')', tuple(imported_run.values()))
                     for table, frame in [('captures',captures),('observations',observations)]:
                         values = frame.astype(object).where(frame.notna(),None)
-                        connection.executemany('INSERT INTO '+table+' VALUES ('+','.join('?' for _ in frame.columns)+')',
+                        connection.executemany('INSERT INTO '+table+' ('+','.join(frame.columns)+') VALUES ('+','.join('?' for _ in frame.columns)+')',
                                                values.itertuples(index=False,name=None))
-            results.append(dict(run_id=run['run_id'], imported_runs=int(not prior),
-                                imported_rows=0 if prior else len(observations), report_path=str(report_path)))
+                results.append(dict(run_id=run['run_id'], imported_runs=int(not prior),
+                                    imported_rows=0 if prior else len(observations), report_path=str(report_path)))
     return pd.DataFrame(results)
+
+
+def _verify_imported_rows(connection, table, expected, run_id, keys):
+    actual = pd.read_sql_query('SELECT * FROM '+table+' WHERE run_id=?', connection, params=[run_id])
+    try:
+        actual = actual[expected.columns].sort_values(keys).reset_index(drop=True)
+        expected = expected.sort_values(keys).reset_index(drop=True)
+        pd.testing.assert_frame_equal(actual.astype(object).where(actual.notna(), None),
+            expected.astype(object).where(expected.notna(), None), check_dtype=False, check_exact=True)
+    except (AssertionError, KeyError) as exc:
+        raise ValueError('Previously imported '+table+' differ from retained evidence') from exc
 
 
 def read_history(database, *, run_ids=None):
     """Return query attempts, captures and observations using a read-only connection."""
     connection = sqlite3.connect(Path(database).resolve().as_uri()+'?mode=ro', uri=True)
     try:
+        selections = {}
+        for table in ('query_runs', 'captures', 'observations'):
+            columns = {row[1] for row in connection.execute('PRAGMA table_info('+table+')')}
+            optional = {'query_runs': 'imported_at_utc', 'captures': 'evidence_available_at_utc'}.get(table)
+            selections[table] = '*'+(', NULL AS '+optional if optional and optional not in columns else '')
         if run_ids is None:
-            return tuple(pd.read_sql_query('SELECT * FROM '+table,connection)
+            return tuple(pd.read_sql_query('SELECT '+selections[table]+' FROM '+table,connection)
                          for table in ('query_runs','captures','observations'))
         ids = list(dict.fromkeys(run_ids))
         chunks = [ids[start:start+500] for start in range(0,len(ids),500)] or [[]]
-        return tuple(pd.concat([pd.read_sql_query('SELECT * FROM '+table+
+        return tuple(pd.concat([pd.read_sql_query('SELECT '+selections[table]+' FROM '+table+
             ' WHERE run_id IN ('+','.join('?' for _ in chunk)+')',connection,params=chunk)
             for chunk in chunks],ignore_index=True)
             for table in ('query_runs','captures','observations'))
