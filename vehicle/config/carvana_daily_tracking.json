@@ -1,0 +1,13 @@
+{
+  "plan": "config/carvana_daily_pilot.json",
+  "timezone": "America/New_York",
+  "capture_root": "data/experiments/carvana_daily",
+  "database": "data/analysis/carvana_daily/history.sqlite",
+  "register": "data/analysis/carvana_daily/cycles.json",
+  "exports": "data/analysis/carvana_daily/tables",
+  "checks": "data/analysis/carvana_daily/listing_checks.csv",
+  "reviews": "data/analysis/carvana_daily/candidate_reviews.csv",
+  "max_requests": 120,
+  "max_seconds": 1200,
+  "followup_limit": 20
+}

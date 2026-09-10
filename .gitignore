@@ -42,3 +42,13 @@ data/processed/**
 !data/raw/IL/.gitkeep
 !config/
 !config/state_gaming_source_inventory.csv
+
+# Vehicle captures and databases remain local.
+vehicle/data/raw/**
+!vehicle/data/raw/.gitkeep
+vehicle/data/*.sqlite*
+vehicle/data/staging/
+vehicle/notebooks/*.executed.ipynb
+vehicle/data/experiments/
+vehicle/.browser_profiles/
+vehicle/data/analysis/

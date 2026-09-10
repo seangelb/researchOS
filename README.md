@@ -1,7 +1,8 @@
 # Variant / researchOS
 
-Learning-first notebooks and small Python modules that collect **official** U.S.
-online sports-betting and online-casino revenue from state regulators.
+Learning-first notebooks and small Python modules for two research projects:
+official U.S. gaming revenue (`gaming` collectors under `src/`) and Carvana
+inventory tracking (`vehicle/`).
 
 ## Active notebooks
 

@@ -1,0 +1,61 @@
+{
+  "capture_method": "browser_dom_sample",
+  "captured_at_utc": "2026-09-08T01:44:11.591Z",
+  "page_url": "https://www.carvana.com/cars",
+  "sample_only": true,
+  "visible_listing_count": 21,
+  "reported_total_text": null,
+  "records": [
+    {
+      "@context": "https://schema.org",
+      "@type": "Vehicle",
+      "brand": "Ford",
+      "color": "Black",
+      "description": "Used 2014 Ford Fusion Titanium with 80683 miles - $14,590",
+      "image": "https://cdnblob.fastly.carvana.io/2004949859/post-large/normalized/zoomcrop/2004949859-edc-02.jpg?v=2026.9.8_1.42.58",
+      "itemCondition": "Used",
+      "manufacturer": "Ford",
+      "mileageFromOdometer": 80683,
+      "model": "Fusion",
+      "modelDate": 2014,
+      "name": "2014 Ford Fusion",
+      "offers": {"@type":"Offer","availability":"http://schema.org/InStock","price":14590,"priceCurrency":"USD","priceValidUntil":"January 1, 2030","url":"https://www.carvana.com/vehicle/4474057"},
+      "sku": 2004949859,
+      "vehicleIdentificationNumber": "3FA6P0D94ER264351"
+    },
+    {
+      "@context": "https://schema.org",
+      "@type": "Vehicle",
+      "brand": "Dodge",
+      "color": "Black",
+      "description": "Used 2021 Dodge Challenger R/T Scat Pack with 51150 miles - $36,590",
+      "image": "https://cdnblob.fastly.carvana.io/3006535023/post-large/normalized/zoomcrop/3006535023-edc-02.jpg?v=2026.9.8_1.42.58",
+      "itemCondition": "Used",
+      "manufacturer": "Dodge",
+      "mileageFromOdometer": 51150,
+      "model": "Challenger",
+      "modelDate": 2021,
+      "name": "2021 Dodge Challenger",
+      "offers": {"@type":"Offer","availability":"http://schema.org/InStock","price":36590,"priceCurrency":"USD","priceValidUntil":"January 1, 2030","url":"https://www.carvana.com/vehicle/4711830"},
+      "sku": 3006535023,
+      "vehicleIdentificationNumber": "2C3CDZFJ5MH624033"
+    },
+    {
+      "@context": "https://schema.org",
+      "@type": "Vehicle",
+      "brand": "Dodge",
+      "color": "Blue",
+      "description": "Used 2012 Dodge Challenger SXT with 78416 miles - $15,590",
+      "image": "https://cdnblob.fastly.carvana.io/2004882079/post-large/normalized/zoomcrop/2004882079-edc-02.jpg?v=2026.9.8_1.42.58",
+      "itemCondition": "Used",
+      "manufacturer": "Dodge",
+      "mileageFromOdometer": 78416,
+      "model": "Challenger",
+      "modelDate": 2012,
+      "name": "2012 Dodge Challenger",
+      "offers": {"@type":"Offer","availability":"http://schema.org/InStock","price":15590,"priceCurrency":"USD","priceValidUntil":"January 1, 2030","url":"https://www.carvana.com/vehicle/4482313"},
+      "sku": 2004882079,
+      "vehicleIdentificationNumber": "2C3CDYAG7CH280838"
+    }
+  ]
+}

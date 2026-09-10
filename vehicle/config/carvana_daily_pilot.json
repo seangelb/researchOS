@@ -1,0 +1,152 @@
+{
+  "description": "Fixed daily pilot: the seven retained Tesla Model 3 year queries, ZIP 08542, location filtering disabled. Complete every query; no sales conversion or national coverage claim.",
+  "queries": [
+    {
+      "query_id": "tesla_model3_2024",
+      "zip_code": "08542",
+      "filters": {
+        "makes": [
+          {
+            "name": "Tesla",
+            "parentModels": [
+              {
+                "name": "Model 3"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "min": 2024,
+          "max": 2024
+        }
+      },
+      "location_filter": false
+    },
+    {
+      "query_id": "tesla_model3_2023",
+      "zip_code": "08542",
+      "filters": {
+        "makes": [
+          {
+            "name": "Tesla",
+            "parentModels": [
+              {
+                "name": "Model 3"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "min": 2023,
+          "max": 2023
+        }
+      },
+      "location_filter": false
+    },
+    {
+      "query_id": "tesla_model3_2022",
+      "zip_code": "08542",
+      "filters": {
+        "makes": [
+          {
+            "name": "Tesla",
+            "parentModels": [
+              {
+                "name": "Model 3"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "min": 2022,
+          "max": 2022
+        }
+      },
+      "location_filter": false
+    },
+    {
+      "query_id": "tesla_model3_2021",
+      "zip_code": "08542",
+      "filters": {
+        "makes": [
+          {
+            "name": "Tesla",
+            "parentModels": [
+              {
+                "name": "Model 3"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "min": 2021,
+          "max": 2021
+        }
+      },
+      "location_filter": false
+    },
+    {
+      "query_id": "tesla_model3_2020",
+      "zip_code": "08542",
+      "filters": {
+        "makes": [
+          {
+            "name": "Tesla",
+            "parentModels": [
+              {
+                "name": "Model 3"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "min": 2020,
+          "max": 2020
+        }
+      },
+      "location_filter": false
+    },
+    {
+      "query_id": "tesla_model3_2025",
+      "zip_code": "08542",
+      "filters": {
+        "makes": [
+          {
+            "name": "Tesla",
+            "parentModels": [
+              {
+                "name": "Model 3"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "min": 2025,
+          "max": 2025
+        }
+      },
+      "location_filter": false
+    },
+    {
+      "query_id": "tesla_model3_2026",
+      "zip_code": "08542",
+      "filters": {
+        "makes": [
+          {
+            "name": "Tesla",
+            "parentModels": [
+              {
+                "name": "Model 3"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "min": 2026,
+          "max": 2026
+        }
+      },
+      "location_filter": false
+    }
+  ]
+}
