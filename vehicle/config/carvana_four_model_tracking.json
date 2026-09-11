@@ -1,0 +1,13 @@
+{
+  "plan": "data/experiments/collection_method_review/20260910T020000Z/proposed_broader_manifest.json",
+  "timezone": "America/New_York",
+  "capture_root": "data/experiments/carvana_four_model_daily",
+  "database": "data/analysis/carvana_four_model_daily/history.sqlite",
+  "register": "data/analysis/carvana_four_model_daily/cycles.json",
+  "exports": "data/analysis/carvana_four_model_daily/tables",
+  "checks": "data/analysis/carvana_four_model_daily/listing_checks.csv",
+  "reviews": "data/analysis/carvana_four_model_daily/candidate_reviews.csv",
+  "max_requests": 120,
+  "max_seconds": 900,
+  "followup_limit": 20
+}

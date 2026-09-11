@@ -86,6 +86,22 @@ The previous stage's [proposed 16-query manifest](../data/experiments/collection
 
 ## Storage and interruption recovery
 
+Notebook 20 now shows unregistered collection health beside the last complete
+registered day. `cycle_diagnostic()` verifies every planned query against retained
+sources, reports zero rows for a journal-verified unattempted final checkpoint,
+and reconciles child request evidence with the durable cycle budget. A reservation
+can reach the budget before its journal; any unexplained difference or pending
+reservation stays uncertain. A stale parent summary is displayed alongside child
+counts, never substituted for them. Its `ended_utc` is not an interruption time.
+
+This read-only view does not repair or import source-less checkpoints. The strict
+import/resume reader still blocks them; safe offline recovery needs a separate
+reviewed change. Missing claimed-success sources, response/hash mismatches and
+journal inconsistencies remain validation failures. Verified partial rows are not
+inventory or sales counts. The diagnostic reports the original window's status;
+it cannot extend that window or resume collection. Operational health describes
+current persisted files even when the notebook's research `AS_OF` is historical.
+
 [storage.py](../src/vehicle_tracker/storage.py) still provides retained captures and per-query SQLite storage. Complete content-addressed files are now written to a temporary file, flushed, then published with a no-overwrite hard link. Existing hash paths are verified, never replaced. The filesystem must support this publication operation; an unsupported operation fails rather than weakening immutability. Temporary/orphan files after a hard interruption are not automatically admitted.
 
 `store_capture()` writes capture metadata and observations in one `BEGIN IMMEDIATE` transaction. Repeating the identical run/page verifies both metadata and rows and performs no new writes; conflicting evidence raises an error. A new run/page observation stays separate.

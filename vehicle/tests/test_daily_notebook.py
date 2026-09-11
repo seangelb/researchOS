@@ -14,7 +14,8 @@ spec = importlib.util.spec_from_file_location('daily_notebook_guards', ROOT / 's
 checker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(checker)
 CELL_IDS = ['daily-operating-view', 'daily-cycle-data', 'daily-operating-tables',
-            'daily-vin-analysis', 'daily-asking-prices', 'daily-price-composition', 'daily-price-bridge', 'sale-review-data',
+            'daily-vin-analysis', 'daily-asking-prices', 'daily-price-composition', 'daily-price-bridge',
+            'daily-observed-age-prices', 'sale-review-data',
             'daily-synthetic-example', 'sale-review-example']
 
 
@@ -160,6 +161,7 @@ def test_daily_notebook_withholds_invalid_daily_comparison(monkeypatch, tmp_path
     assert scope['daily_identity_join'].empty
     assert scope['daily_change_counts'].empty
     assert scope['asking_price_means'].empty
+    assert scope['age_price_summary'].empty and scope['age_model_breakdown'].empty
     if problem == 'duplicate':
         assert len(scope['identity_issues']) == 2
 
@@ -251,6 +253,12 @@ def test_irregular_windows_are_not_scaled_to_a_day(monkeypatch, tmp_path, two_cy
     assert windows.timezone.tolist() == ['UTC', 'UTC']
     assert windows.window_start_local.iloc[0] == '2026-09-01T21:45:00+00:00'
     assert scope['matched_price_rows'].visible_asking_price_change_usd.tolist() == [-500]
+    age = scope['age_price_rows'].iloc[0]
+    assert age.elapsed_observation_hours == 9.25
+    assert age.days_since_first_observed == pytest.approx(9.25 / 24)
+    assert age.observed_age_group == '<1 day'
+    assert age.observed_at_utc_before == pd.Timestamp('2026-09-01T21:46:00Z')
+    assert age.observed_at_utc_after == pd.Timestamp('2026-09-02T07:01:00Z')
     assert 'not a measured 24-hour flow' in capsys.readouterr().out
 
 
@@ -278,6 +286,7 @@ def run_page_cell(days, rows, checks, cutoff):
         validate_checks=validate_checks, TRACKING_AS_OF=cutoff,
         daily_events=vin_events(known_days, known_rows))
     with checker.offline_guards():
+        exec(daily_code()['daily-check-history'], scope)
         exec(daily_code()['daily-page-checks'], scope)
     return scope
 
@@ -318,3 +327,66 @@ def test_page_history_counts_physical_checks_and_keeps_relisting_followup():
     old_listing_followup = later.loc[later.checked_listing_id.eq('L1')]
     assert old_listing_followup.listing_id.eq('L2').all()
     assert old_listing_followup.reappeared_after_absence.any()
+
+
+def test_age_reduction_denominator_counts_only_known_matched_prices(monkeypatch, tmp_path, two_cycle_rows):
+    days, template = two_cycle_rows
+    parts = []
+    for vin, previous, current, model in [('CUT1', 20000, 19500, 'Model A'),
+            ('CUT2', 20000, 19000, 'Model B'), ('FLAT', 20000, 20000, 'Model A'),
+            ('MISSING', None, 10000, 'Model B')]:
+        part = template.copy().assign(vin=vin, make='Synthetic', model=model)
+        part['listing_id'] = [vin + '-old', vin + '-new']
+        part['asking_price_usd'] = [previous, current]
+        parts.append(part)
+    parts.extend([template.iloc[[0]].assign(vin='GONE', listing_id='gone'),
+                  template.iloc[[1]].assign(vin='NEW', listing_id='new')])
+    scope = execute_daily(monkeypatch, tmp_path, days, pd.concat(parts, ignore_index=True))
+    summary = scope['age_price_summary'].iloc[0]
+    assert summary.eligible_matched_vehicles == 3 and summary.price_reductions == 2
+    assert summary.price_reduction_pct == pytest.approx(200 / 3)
+    assert summary.median_reduction_usd == 750
+    groups = scope['age_model_breakdown'].set_index('model')
+    assert groups.loc['Model A', 'price_reduction_pct'] == 50
+    assert groups.loc['Model B', 'price_reduction_pct'] == 100
+    assert scope['age_price_rows'].days_since_first_observed.eq(1).all()
+    assert scope['age_price_rows'].observed_age_group.eq('1 to <3 days').all()
+    assert scope['age_price_rows'].present_in_initial_collection.all()
+    assert set(scope['age_price_rows'].vin) == {'CUT1', 'CUT2', 'FLAT'}
+
+
+@pytest.mark.parametrize('condition', ['no_cuts', 'missing_prices', 'no_matches'])
+def test_age_empty_or_no_reductions_does_not_invent_a_median(monkeypatch, tmp_path, two_cycle_rows, condition):
+    days, rows = two_cycle_rows
+    rows['asking_price_usd'] = 20000 if condition != 'missing_prices' else None
+    if condition == 'no_matches':
+        rows['vin'] = ['BEFORE', 'AFTER']
+    scope = execute_daily(monkeypatch, tmp_path, days, rows)
+    if condition == 'no_cuts':
+        result = scope['age_price_summary'].iloc[0]
+        assert result.eligible_matched_vehicles == 1 and result.price_reduction_pct == 0
+        assert pd.isna(result.median_reduction_usd)
+    else:
+        assert scope['age_price_summary'].empty and scope['age_price_rows'].empty
+
+
+@pytest.mark.parametrize('early_evidence', ['known', 'late_available', 'partial'])
+def test_first_observed_age_uses_selected_complete_history_at_cutoff(
+        monkeypatch, tmp_path, two_cycle_rows, early_evidence):
+    days, rows = two_cycle_rows
+    # Synthetic third observation creates a valid last pair on days 2/3.
+    third = days.iloc[[1]].copy()
+    third['cycle_id'] = 'cycle-03'
+    for field in ['cycle_date', 'window_start', 'window_end', 'available_at']:
+        third[field] = third[field].str.replace('09-02', '09-03', regex=False)
+    last_row = rows.iloc[[1]].assign(cycle_id='cycle-03', asking_price_usd=19000,
+        observed_at_utc='2026-09-03T10:30:00Z', capture_id='capture-03', run_id='run-03')
+    days = pd.concat([days, third], ignore_index=True)
+    rows = pd.concat([rows, last_row], ignore_index=True)
+    if early_evidence == 'late_available': days.loc[0, 'available_at'] = '2026-09-09T00:00:00Z'
+    if early_evidence == 'partial': days.loc[0, 'coverage_complete'] = False
+    scope = execute_daily(monkeypatch, tmp_path, days, rows)
+    age = scope['age_price_rows'].iloc[0]
+    assert age.days_since_first_observed == (2 if early_evidence == 'known' else 1)
+    assert age.reduction_usd == 500 and age.elapsed_observation_hours == 24
+    assert scope['age_price_summary'].eligible_matched_vehicles.iloc[0] == 1

@@ -69,17 +69,52 @@ def _verify_capture_metadata(page, capture):
         raise ValueError('Response clocks differ between query report and retained capture')
 
 
-def read_query_evidence(report_path):
+def _source_less_checkpoint(report_path, report, page):
+    """Validate a journal checkpoint for diagnosis only; it admits no observations."""
+    if (report.get('evidence_contract') != 'carvana-search-source-v1' or report['query_complete']
+            or page is not report['pages'][-1]
+            or page.get('page') != len(report['pages'])
+            or page.get('status') != 'pending' or page.get('stored_rows') != 0
+            or page.get('outcome_kind') not in {'unattempted', 'request_reserved'}
+            or not isinstance(page.get('attempt_id'), str) or not page['attempt_id']
+            or any(page.get(key) is not None for key in (
+                'retained_source', 'source_sha256', 'http_status', 'response_received_at_utc',
+                'response_evidence', 'response_sha256', 'response_bytes', 'evidence_available_at_utc'))):
+        raise ValueError('Missing successful-response source or unsupported incomplete checkpoint')
+    reserved = page.get('request_reserved_at_utc')
+    started = page.get('request_started_at_utc')
+    if page['outcome_kind'] == 'unattempted' and (reserved is not None or started is not None):
+        raise ValueError('Unattempted checkpoint contains request clocks')
+    if page['outcome_kind'] == 'request_reserved':
+        clocks = [pd.Timestamp(value) for value in [reserved, started] if value is not None]
+        if not reserved or any(pd.isna(value) or value.tzinfo is None for value in clocks) or clocks != sorted(clocks):
+            raise ValueError('Reserved checkpoint lacks valid request clocks')
+    journal = json.loads((report_path.parent / 'attempts' / f"{page['page']:04d}.json").read_text(encoding='utf-8'))
+    request = dict(filters=report['filters'], pagination=dict(page=page['page'], pageSize=24),
+                   sortBy='MostPopular', zip5=report['zip_code'])
+    if report.get('location_filter', False):
+        request['requestedFeatures'] = ['LocationBasedPrefiltering']
+    if journal != dict(run_id=report['run_id'], request=request, **page):
+        raise ValueError('Checkpoint journal differs from query run, attempt, page or context')
+    return page['outcome_kind']
+
+
+def read_query_evidence(report_path, *, diagnostic=False):
     """Verify source hashes and context; normalize only pages admitted by the collector.
 
     Failed/partial attempts remain in coverage. A claimed complete query must also
     reconcile to its retained pages, native totals, identities and actual timestamps.
+    Diagnostic mode can inspect verified source-less checkpoints, with zero rows;
+    the default import/recovery contract still rejects those incomplete checkpoints.
     """
     report_path = Path(report_path).resolve()
     report = json.loads(report_path.read_text(encoding='utf-8'))
-    frames, captures, contexts, totals, page_ends = [], [], [], [], []
+    frames, captures, contexts, totals, page_ends, checkpoints = [], [], [], [], [], []
     for page in report['pages']:
         if not page.get('retained_source'):
+            if diagnostic:
+                checkpoints.append(_source_less_checkpoint(report_path, report, page))
+                continue
             raise ValueError('Incomplete query checkpoint lacks retained source; review or recover before importing')
         source = Path(page['retained_source'])
         source_hash = file_hash(source)
@@ -156,6 +191,9 @@ def read_query_evidence(report_path):
         invocation_start=report['started_utc'], invocation_end=report.get('ended_utc'),
         normalizer_sha256=hashlib.sha256(code.encode()).hexdigest(),
         original_normalizer_sha256=report.get('normalizer_code_sha256'))
+    if diagnostic:
+        run.update(unattempted_pages=checkpoints.count('unattempted'),
+                   uncertain_pages=checkpoints.count('request_reserved'))
     return run, capture_rows, observations.reindex(columns=OBSERVATION_COLUMNS)
 
 

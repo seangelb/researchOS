@@ -53,6 +53,68 @@ def test_real_seven_page_projection_replay(captures):
     assert rows[5]['purchaseType'] == 'Reservable'
 
 
+@pytest.fixture
+def hold_captures():
+    return json.loads((FIXTURE.parent / 'hold_projections_20260910_11.json').read_text(encoding='utf-8'))
+
+
+def test_observed_countdown_badges_mean_pending_and_preserve_native_text(hold_captures):
+    for capture in hold_captures:
+        row = parse(capture, available_at='2026-09-12T00:00:00Z')
+        assert row['parse_outcome'] == 'matched' and row['observed_status'] == 'pending'
+        assert row['hero_badge'] == capture['hero_badge']
+        assert row['saleStatus'] == 'Available' and row['purchaseType'] == 'Purchasable'
+    assert [c['hero_badge'] for c in hold_captures] == ['On Hold\n00:00', 'On Hold\n19:08']
+
+
+@pytest.mark.parametrize('badge', ['On Hold', 'On Hold\n1:08', 'On Hold\n19:60',
+    'On Hold\n19:08 extra', 'Other vehicle On Hold\n19:08', 'On Hold\n19:08\n', 'on hold\n19:08'])
+def test_synthetic_unobserved_hold_formats_are_not_guessed(hold_captures, badge):
+    capture = hold_captures[1]
+    capture.update(hero_badge=badge, hero_text='Equipment and other vehicles\nOn Hold\n19:08')
+    row = parse(capture, available_at='2026-09-12T00:00:00Z')
+    assert row['observed_status'] == 'unknown' and row['hero_badge'] == badge
+
+
+@pytest.mark.parametrize('conflict', ['sold', 'not_purchasable', 'reservable', 'ready', 'unavailable', 'sold_text', 'vin', 'url'])
+def test_synthetic_hold_conflicts_stay_unresolved(hold_captures, conflict):
+    capture = hold_captures[1]
+    if conflict == 'sold': details(capture).update(saleStatus='Sold', purchaseType='NotPurchasable')
+    if conflict == 'not_purchasable': details(capture)['purchaseType'] = 'NotPurchasable'
+    if conflict == 'reservable': details(capture)['purchaseType'] = 'Reservable'
+    if conflict == 'ready': capture['purchase_button'] = 'Get Started'
+    if conflict == 'unavailable': capture['hero_text'] = 'This vehicle is no longer available'
+    if conflict == 'sold_text': capture['hero_text'] = 'Sold'
+    if conflict == 'vin': details(capture)['vin'] = 'SYNTHETIC-WRONG-VIN'
+    if conflict == 'url': capture['final_url'] = 'https://www.carvana.com/vehicle/9999999'
+    row = parse(capture, available_at='2026-09-12T00:00:00Z')
+    assert row['observed_status'] == 'unknown'
+    assert row['parse_outcome'] == ('identity_mismatch' if conflict in ['vin', 'url'] else 'conflicting_status')
+
+
+def test_saved_hold_replays_without_rewriting_or_extra_sold_transitions(tmp_path, importer, hold_captures):
+    capture = hold_captures[1]
+    expected = capture['expected']
+    # Synthetic cohort/timeline using the real retained badge, entirely in temporary storage.
+    cohort = dict(cohort_id='synthetic-hold-test', selected_at='2026-09-10T00:00:00Z',
+        vehicles=[dict(expected, url=capture['final_url'], role='prospective_inventory', selection_reason='synthetic test')])
+    source = tmp_path / 'input.json'
+    source.write_text(json.dumps(capture), encoding='utf-8')
+    folder, _ = importer.import_captures([source], cohort, root=tmp_path, now='2026-09-11T03:00:00Z', save=True)
+    before = {p: p.read_bytes() for p in folder.iterdir()}
+    records = load_pilot(tmp_path, cohort, as_of='2026-09-13T00:00:00Z')
+    assert {p: p.read_bytes() for p in folder.iterdir()} == before
+    assert records.observed_status.tolist() == ['pending']
+    initial = records.iloc[0].to_dict()
+    sold = dict(initial, checked_at='2026-09-12T01:00:00Z', available_at='2026-09-12T01:05:00Z',
+        saleStatus='Sold', purchaseType='NotPurchasable', observed_status='sold_label', hero_badge='Sold')
+    repeat = dict(sold, checked_at='2026-09-12T02:00:00Z', available_at='2026-09-12T02:05:00Z')
+    result = summarize_pilot(pd.DataFrame([initial, sold, repeat]), cohort, as_of='2026-09-13T00:00:00Z')
+    assert result.newly_observed_sold.sum() == 1
+    assert result.first_sold_at.iloc[0] == pd.Timestamp(sold['checked_at'])
+    assert result.last_non_sold_at.iloc[0] == pd.Timestamp(initial['checked_at'])
+
+
 def test_recommendations_and_react_path_changes_do_not_change_target(captures):
     sold, other = captures[0], captures[4]
     sold['contexts'][0]['source_path'] = 'arbitrary.999.children.42.forVehicleContext.vehicleDetails'

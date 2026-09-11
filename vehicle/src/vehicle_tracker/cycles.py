@@ -193,6 +193,128 @@ def cycle_evidence(path, *, as_of=None):
     return state, coverage, reports
 
 
+def cycle_diagnostic(path, *, now=None):
+    """Read current checkpoints without importing, repairing or authorizing requests.
+
+    Parent summaries can lag child checkpoints. Source-less pages are inspected
+    only through the diagnostic reader; they never become captures or inventory.
+    This is operational health now, not a historical evidence-cutoff reconstruction.
+    """
+    path = Path(path).resolve()
+    state = _cycle_state(path)
+    now = now or utcnow()
+    selected, parents, errors = {}, [], []
+    child_requests = page_requests = uncertain_pages = 0
+    for index, attempt in enumerate(state['attempts'], 1):
+        if attempt != f'attempt_{index:04d}':
+            raise ValueError('Invalid cycle attempt path')
+        attempt_requests, frames = 0, []
+        for query in state['queries']:
+            report = path.parent / attempt / query['query_id'] / 'run_report.json'
+            if not report.is_file():
+                if report.parent.exists():
+                    errors.append(f"{attempt}/{query['query_id']}: query folder lacks report")
+                    selected[query['query_id']] = dict(status='invalid evidence', reason=errors[-1])
+                continue
+            row = dict(status='invalid evidence', report_path=str(report))
+            try:
+                native = json.loads(report.read_text(encoding='utf-8'))
+                if (native['filters'] != query['filters'] or native['zip_code'] != query['zip_code']
+                        or native.get('location_filter', False) != query.get('location_filter', False)
+                        or native.get('endpoint') != ENDPOINT):
+                    raise ValueError('Query attempt differs from the cycle plan')
+                count = native['requests']
+                if type(count) is not int or count < 0:
+                    raise ValueError('Invalid retained query request count')
+                child_requests += count
+                attempt_requests += count
+                row['child_requests'] = count
+                pages = native['pages']
+                if [page['page'] for page in pages] != list(range(1, len(pages) + 1)):
+                    raise ValueError('Query page sequence differs from checkpoint order')
+                reserved = sum(bool(page.get('request_reserved_at_utc') or page.get('request_started_at_utc')
+                    or page.get('response_received_at_utc') or page.get('status') == 'parsed') for page in pages)
+                page_requests += reserved
+                if count != reserved:
+                    raise ValueError('Child request count differs from page reservation evidence')
+                run, captures, rows = read_query_evidence(report, diagnostic=True)
+                frames.append(rows)
+                uncertain = run['uncertain_pages'] + sum(bool(page.get('request_started_at_utc')
+                    and not page.get('response_received_at_utc') and page.get('retained_source')) for page in pages)
+                uncertain_pages += uncertain
+                fresh = bool(run['observation_start'] and run['observation_end'] and
+                    aware(state['window_start']) <= aware(run['observation_start']) <=
+                    aware(run['observation_end']) < aware(state['window_end']))
+                row.update(verified_retained_rows=len(rows), parsed_pages=int(captures.status.eq('parsed').sum()),
+                    unattempted_pages=run['unattempted_pages'], uncertain_pages=uncertain,
+                    child_requests=count, reported_total=run['reported_total'],
+                    query_complete=bool(run['query_complete']), within_window=fresh,
+                    status=('complete' if run['query_complete'] and fresh else
+                            'request outcome uncertain' if uncertain else
+                            'partial; unattempted checkpoint' if run['unattempted_pages'] else 'partial'),
+                    reason='Outside frozen window' if run['query_complete'] and not fresh else run['coverage_reason'])
+            except (ValueError, OSError, KeyError, TypeError) as error:
+                row['reason'] = str(error)
+                errors.append(f"{attempt}/{query['query_id']}: {error}")
+            if query['query_id'] not in selected or selected[query['query_id']].get('status') != 'complete':
+                selected[query['query_id']] = row
+        parent = path.parent / attempt / 'run_report.json'
+        parent_row = dict(attempt=attempt, child_requests=attempt_requests)
+        if frames:
+            source_rows = pd.concat(frames, ignore_index=True)
+            parent_row['verified_retained_unique_listings'] = len(source_rows[['retailer', 'listing_id']].drop_duplicates())
+        if parent.is_file():
+            try:
+                native_parent = json.loads(parent.read_text(encoding='utf-8'))
+                if native_parent['queries'] != state['queries']:
+                    raise ValueError('Parent plan differs from frozen cycle plan')
+                for key in ['requests', 'unique_listings']:
+                    value = native_parent.get(key)
+                    if type(value) is not int or value < 0:
+                        raise ValueError('Invalid parent summary count')
+                    parent_row['parent_' + key] = value
+                parent_row['summary_differs_from_children'] = (
+                    parent_row['parent_requests'] != attempt_requests or
+                    parent_row['parent_unique_listings'] != parent_row.get('verified_retained_unique_listings', 0))
+            except (ValueError, OSError, KeyError, TypeError) as error:
+                errors.append(f'{attempt} parent: {error}')
+        else:
+            parent_row['summary_differs_from_children'] = True
+        parents.append(parent_row)
+    budget = state['budget']
+    reconciled = budget['requests'] == child_requests == page_requests
+    uncertainty = bool(budget['pending_request'] or uncertain_pages or not reconciled)
+    coverage = []
+    for query in state['queries']:
+        row = dict(query_id=query['query_id'], status='not started', verified_retained_rows=0,
+            parsed_pages=0, unattempted_pages=0, uncertain_pages=0, child_requests=0,
+            reported_total=None, query_complete=False, within_window=False, reason='No child report')
+        row.update(selected.get(query['query_id'], {}))
+        if row['status'] == 'invalid evidence':
+            row.update(verified_retained_rows=None, parsed_pages=None, unattempted_pages=None, uncertain_pages=None)
+        if uncertainty and row['unattempted_pages']:
+            row['status'] = 'partial; request reservation uncertain'
+            row['uncertain_pages'] += row['unattempted_pages']
+            row['unattempted_pages'] = 0
+            row['reason'] = 'Durable reservation cannot be attributed safely to an unattempted checkpoint'
+        if not reconciled and row['status'] == 'not started':
+            row['status'] = 'no report; request attribution uncertain'
+        coverage.append(row)
+    coverage = pd.DataFrame(coverage)
+    elapsed = (now - aware(state['created_at'])).total_seconds()
+    window_open = 0 <= elapsed < state['max_seconds'] and aware(state['window_start']) <= now < aware(state['window_end'])
+    summary = dict(cycle_date=state['cycle_date'], window_start=state['window_start'], window_end=state['window_end'],
+        checked_at=now.isoformat(), window_open=window_open, coverage_complete=bool(coverage.status.eq('complete').all()) and not errors,
+        durable_requests=budget['requests'], child_requests=child_requests, page_reservations=page_requests,
+        unattributed_reservations=max(0, budget['requests'] - page_requests),
+        requests_reconciled=reconciled, request_outcome_uncertain=uncertainty,
+        pending_request=budget['pending_request'], stopped=budget['stopped'],
+        parent_summaries=parents, validation_errors=errors,
+        recovery_limit='Diagnostic only; if present, source-less checkpoints require a separate reviewed recovery change. '
+                       'No window extension or automatic resume.')
+    return summary, coverage
+
+
 def collect_cycle(queries, *, destination, cycle_date, timezone_name, window_start, window_end,
                   max_requests=120, max_seconds=1200, resume=False, post=None):
     """Collect the whole declared plan in a bounded daily window; no implicit retries."""

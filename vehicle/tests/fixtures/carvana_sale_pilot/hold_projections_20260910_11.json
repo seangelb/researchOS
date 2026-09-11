@@ -1,0 +1,62 @@
+[
+  {
+    "access_outcome": "ok",
+    "checked_at": "2026-09-10T00:24:39.371Z",
+    "contexts": [
+      {
+        "forVehicleContext": {
+          "vehicleDetails": {
+            "inventoryType": "Core",
+            "purchaseType": "Purchasable",
+            "saleStatus": "Available",
+            "vehicleId": 4681095,
+            "vin": "5YJ3E1EA0LF632279"
+          }
+        },
+        "source_path": "b.3.children.3.3.forVehicleContext.vehicleDetails"
+      }
+    ],
+    "expected": {
+      "listing_id": "4681095",
+      "retailer": "carvana",
+      "vin": "5YJ3E1EA0LF632279"
+    },
+    "final_url": "https://www.carvana.com/vehicle/4681095",
+    "format": "carvana-public-detail-projection-v1",
+    "hero_badge": "On Hold\n00:00",
+    "hero_text": null,
+    "note": "Selected public DOM/RSC fields; not original HTML. No HTTP status measured.",
+    "purchase_button": "View Similar",
+    "requested_url": "https://www.carvana.com/vehicle/4681095"
+  },
+  {
+    "access_outcome": "ok",
+    "checked_at": "2026-09-11T02:21:29.144Z",
+    "contexts": [
+      {
+        "forVehicleContext": {
+          "vehicleDetails": {
+            "inventoryType": "Core",
+            "purchaseType": "Purchasable",
+            "saleStatus": "Available",
+            "vehicleId": 4682416,
+            "vin": "5YJ3E1EAXNF203444"
+          }
+        },
+        "source_path": "b.3.children.3.3.forVehicleContext.vehicleDetails"
+      }
+    ],
+    "expected": {
+      "listing_id": "4682416",
+      "retailer": "carvana",
+      "vin": "5YJ3E1EAXNF203444"
+    },
+    "final_url": "https://www.carvana.com/vehicle/4682416",
+    "format": "carvana-public-detail-projection-v1",
+    "hero_badge": "On Hold\n19:08",
+    "hero_text": null,
+    "note": "Selected public DOM/RSC fields; not original HTML. No HTTP status measured.",
+    "purchase_button": "View Similar",
+    "requested_url": "https://www.carvana.com/vehicle/4682416"
+  }
+]

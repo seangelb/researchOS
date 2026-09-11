@@ -155,7 +155,11 @@ def parse_capture(capture, *, expected, available_at, source):
         return item
     lines = (item['hero_text'] or '').splitlines()
     ui_sold = badge == 'Sold' or 'Sold' in lines
-    ui_pending = badge == 'Purchase in progress' or 'Purchase in progress' in lines
+    # Retained target badges: "On Hold\n00:00" and "On Hold\n19:08".
+    # Match only the complete badge with an MM:SS countdown, never page prose.
+    # Even 00:00 is an observed hold badge, not evidence of expiry or a sale.
+    ui_hold = bool(re.fullmatch(r'On Hold\n[0-9]{2}:[0-5][0-9]', badge or ''))
+    ui_pending = ui_hold or badge == 'Purchase in progress' or 'Purchase in progress' in lines
     ui_ready = button == 'Get Started'
     ui_preorder = badge == 'Pre-order now' or button == 'Pre-Order Now'
     ui_unavailable = 'This vehicle is no longer available' in lines

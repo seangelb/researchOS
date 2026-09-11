@@ -30,7 +30,8 @@ def main(argv=None):
     print('Source:', ENDPOINT, '| Plan:', settings['plan'], flush=True)
     state, folder, tables = run_tracking(settings, live=args.live, import_path=args.import_cycle, refresh=args.refresh)
     if tables is None:
-        print(json.dumps({key: value for key, value in state.items() if key != 'queries'}, indent=2))
+        print(json.dumps(dict(state, destinations={key: str(settings[key]) for key in
+            ['capture_root', 'database', 'register', 'exports', 'checks', 'reviews']}), indent=2))
         print('Queries:', len(settings['queries']), 'Database:', settings['database'])
         print('Preview only: no requests or writes. --live collects/imports/exports this fixed pilot.')
         return 0

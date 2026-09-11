@@ -33,8 +33,8 @@ root `.venv`. Normal **Run All is offline and read-only**.
 
 | Notebook | Use it for |
 | --- | --- |
-| [20: inventory and vehicle review](notebooks/20_carvana_history_analysis.ipynb) | Inputs/population, collection coverage, visible retailer/VIN join, individual price changes, mean-price breakdown, one vehicle's SQL/source trace |
-| [22: website-status evidence](notebooks/22_carvana_sale_status_validation.ipynb) | Checked/unchecked vehicles, exact native values, unresolved reasons, between-check changes, and a review-only attention list |
+| [20: inventory and vehicle review](notebooks/20_carvana_history_analysis.ipynb) | Population/dates/completeness → native inventory → matched VIN/price changes → composition and reductions by days since first observed → SQL/source trace |
+| [22: website-status evidence](notebooks/22_carvana_sale_status_validation.ipynb) | Cohort/repeat coverage → latest native statuses → first Sold/repeated Sold/reappearances → next checks → one evidence timeline; historical studies follow as optional sections |
 | [10: how the POST works](notebooks/10_carvana_inventory.ipynb) | Learn the request, response fields, pagination and parsing |
 | [21: earlier intraday reference](notebooks/21_carvana_intraday_reference.ipynb) | Inspect the retained morning experiment; it is separate from daily history |
 | [00: source introduction](notebooks/00_source_walkthrough.ipynb) | Existing learning examples and one retained source |
@@ -51,6 +51,30 @@ attention view. Its frozen-cohort JSON captures remain separate from notebook 20
 canonical manual check/review histories. Failed checks do not refresh native status
 or invent a between-check change. Saving a real page check remains an explicit
 manual action: [recording guide](docs/listing_checks.md), [pilot capture/import guide](docs/sale_pilot.md).
+
+### Experimental four-model preview
+
+The separate [experimental configuration](config/carvana_four_model_tracking.json)
+reuses the frozen September 10 proposal: 16 year queries covering Tesla Model 3
+(2020–2026), Chevrolet Equinox, Ford Escape and Toyota Corolla (2022–2024 each).
+From the repository root, this verified command is offline and read-only:
+
+```powershell
+.\.venv\Scripts\python.exe -B vehicle/scripts/run_carvana_daily.py --config vehicle/config/carvana_four_model_tracking.json
+```
+
+It prints all queries, the 120-request/900-second limits, and separate capture,
+SQLite, register, export, check and review destinations. Existing search spacing
+remains at least three seconds. The proposal's retained counts are dated planning
+evidence, not current counts or guaranteed request requirements. The seven-query
+operating configuration and the 33-VIN page-check cohort remain unchanged.
+The configuration is ready for a separately authorized bounded trial; its live
+completeness and access reliability have not been tested together.
+
+The [September 11 review package](docs/applied_workflow_review_20260911.md) lists
+exact review cells, all 16 query IDs, resolved destinations, cutoff comparisons
+and validation results. It also documents the intentional `On Hold\nMM:SS`
+interpretation correction: pending purchase activity, never a completed sale.
 
 ## 3. Follow the files when something fails
 

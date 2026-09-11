@@ -11,7 +11,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from vehicle_tracker.cycles import (collect_cycle, cycle_config, cycle_evidence, cycle_lock,
+from vehicle_tracker.cycles import (collect_cycle, cycle_config, cycle_diagnostic, cycle_evidence, cycle_lock,
                                     import_cycle, read_cycle_history, utcnow)
 from vehicle_tracker.events import _aware, vin_events
 from vehicle_tracker.sales import CANDIDATE_COLUMNS, REVIEW_COLUMNS, sale_candidates
@@ -139,6 +139,11 @@ def recovery_candidates(settings, *, now=None):
             continue
         row = dict(path=str(path.resolve()), import_allowed=False, live_resume_allowed=False)
         try:
+            diagnostic, query_health = cycle_diagnostic(path, now=now)
+            row.update(diagnostic, query_health=query_health.to_dict('records'))
+            if diagnostic['validation_errors'] or not diagnostic['requests_reconciled']:
+                raise ValueError('; '.join(diagnostic['validation_errors']) or
+                                 'Durable request budget differs from child/page evidence; outcome uncertain')
             state, coverage, reports = cycle_evidence(path)
             retained_stop = None
             for report in reports:
@@ -155,6 +160,7 @@ def recovery_candidates(settings, *, now=None):
             reason = ('Settings population or timezone differs' if not matches else
                 'Date already registered with different evidence; review only' if date_selected else
                 'Complete retained cycle; no requests needed' if state['coverage_complete'] else
+                'Retained request outcome uncertain; live resume blocked' if diagnostic['request_outcome_uncertain'] else
                 'Previous request outcome uncertain; live resume blocked' if state['budget']['pending_request'] else
                 'Access or transport stop; live resume blocked' if state['budget']['stopped'] else
                 retained_stop if retained_stop else
