@@ -10,7 +10,8 @@ import pandas as pd
 import pytest
 
 from vehicle_tracker.sale_pilot import (known_disjoint_cohorts, load_pilot, parse_capture,
-                                       select_extension, summarize_pilot)
+                                       select_extension, summarize_pilot,
+                                       load_selection_plan, load_research_pass)
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURE = ROOT / 'tests/fixtures/carvana_sale_pilot/chrome_projections_20260909.json'
@@ -42,6 +43,79 @@ def parse(capture, **kwargs):
 
 def details(capture):
     return capture['contexts'][0]['forVehicleContext']['vehicleDetails']
+
+
+@pytest.fixture
+def diagnostic_pass(tmp_path, captures):
+    """Synthetic plan/pass clocks around one real retained projection."""
+    import hashlib
+    capture = captures[0]
+    checked = pd.Timestamp(capture['checked_at'])
+    selection = (checked - pd.Timedelta(minutes=1)).isoformat()
+    available = (checked + pd.Timedelta(hours=1)).isoformat()
+    plan_path, report_path = tmp_path / 'plan.json', tmp_path / 'pass.json'
+    page = dict(capture['expected'], url=capture['requested_url'], selection_reason='random new exit')
+    plan_path.write_text(json.dumps(dict(prepared_at=selection, pages=[page])), encoding='utf-8')
+    source = tmp_path / 'capture.json'
+    source.write_text(json.dumps(capture), encoding='utf-8')
+    entry = dict(file=source.name, sha256=hashlib.sha256(source.read_bytes()).hexdigest(),
+        expected=capture['expected'], selection_reason=page['selection_reason'], frozen_cohort_member=False)
+    report_path.write_text(json.dumps(dict(available_at=available, selection_as_of=selection,
+        captures=[entry])), encoding='utf-8')
+    return plan_path, report_path, selection, available
+
+
+def test_diagnostic_plan_precedes_observations_and_never_creates_membership(diagnostic_pass):
+    plan_path, report_path, selected_at, available_at = diagnostic_pass
+    before = (pd.Timestamp(selected_at) - pd.Timedelta(seconds=1)).isoformat()
+    assert load_selection_plan(plan_path, as_of=before).empty
+    selected = load_selection_plan(plan_path, as_of=selected_at)
+    assert len(selected) == 1
+    report, records = load_research_pass(report_path, selected, [], as_of=selected_at)
+    assert report is None and records.empty  # A saved plan is not a page check.
+    report, records = load_research_pass(report_path, selected, [], as_of=available_at)
+    assert len(records) == 1 and not records.frozen_cohort_member.any()
+    assert records.parse_outcome.eq('matched').all()
+
+
+@pytest.mark.parametrize('problem', ['hash', 'path', 'identity', 'reason', 'membership', 'duplicate', 'clock',
+                                   'failed_capture_identity'])
+def test_diagnostic_pass_rejects_broken_bindings(diagnostic_pass, problem):
+    plan_path, report_path, selected_at, available_at = diagnostic_pass
+    selected = load_selection_plan(plan_path, as_of=available_at)
+    report = json.loads(report_path.read_text(encoding='utf-8'))
+    entry = report['captures'][0]
+    if problem == 'hash': entry['sha256'] = '0' * 64
+    elif problem == 'path': entry['file'] = '../capture.json'
+    elif problem == 'identity': entry['expected']['listing_id'] = '999'
+    elif problem == 'reason': entry['selection_reason'] = 'changed after observation'
+    elif problem == 'membership': entry['frozen_cohort_member'] = True
+    elif problem == 'duplicate': report['captures'].append(dict(entry))
+    elif problem == 'clock': report['selection_as_of'] = available_at
+    elif problem == 'failed_capture_identity':
+        import hashlib
+        source = report_path.parent / entry['file']
+        capture = json.loads(source.read_text(encoding='utf-8'))
+        capture['access_outcome'] = 'access_blocked'
+        capture['expected']['vin'] = '1HGCM82633A000001'
+        source.write_text(json.dumps(capture), encoding='utf-8')
+        entry['sha256'] = hashlib.sha256(source.read_bytes()).hexdigest()
+    report_path.write_text(json.dumps(report), encoding='utf-8')
+    with pytest.raises(ValueError):
+        load_research_pass(report_path, selected, [], as_of=available_at)
+
+
+def test_selection_plan_uses_availability_and_rejects_duplicate_targets(diagnostic_pass):
+    plan_path, _, selected_at, available_at = diagnostic_pass
+    plan = json.loads(plan_path.read_text(encoding='utf-8'))
+    plan['available_at'] = available_at
+    plan_path.write_text(json.dumps(plan), encoding='utf-8')
+    assert load_selection_plan(plan_path, as_of=selected_at).empty
+    assert len(load_selection_plan(plan_path, as_of=available_at)) == 1
+    plan['pages'].append(dict(plan['pages'][0]))
+    plan_path.write_text(json.dumps(plan), encoding='utf-8')
+    with pytest.raises(ValueError, match='repeats'):
+        load_selection_plan(plan_path, as_of=available_at)
 
 
 def test_real_seven_page_projection_replay(captures):

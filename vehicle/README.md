@@ -1,10 +1,57 @@
 # Carvana: one notebook-first workflow
 
-**Collect with `run_carvana_daily.py`. Analyze inventory in notebook 20. Inspect
-native website-status checks in notebook 22.** Python, pandas, SQLite and retained
-JSON remain the whole design; there is no new service or scheduler.
+Start with the offline notebook review below. Python, pandas, SQLite and retained
+JSON remain the whole design. Normal **Run All reads existing local evidence**.
 
-## 1. Preview, then explicitly collect
+## Notebook review guide
+
+Open Jupyter with `powershell -File scripts/start_jupyter.ps1` from the repository
+root, using its `.venv`. Review **00 → 10 → 20 → 22 → 23 → 30**; **21 is optional**.
+Run each notebook from the top. The names in backticks below are stable cell IDs
+and output variables, so they can also be found by searching the notebook source.
+
+For a common evidence vintage, use `AS_OF_OVERRIDE = '2026-09-11T16:41:25.820875+00:00'`
+before running the settings in 20, 22 and 23. Notebook 23 now defaults to the later
+browser validation cutoff; that same override reproduces its earlier review. Notebook 30 deliberately starts with no inventory reports; its introduction
+shows how to select the retained September 11 report and matching database.
+For Notebook 20's September 8/9 reconciliation below, replay
+`AS_OF_OVERRIDE = '2026-09-09T12:00:00Z'`. At the common September 11 cutoff, the
+missing September 10 correctly prevents a daily comparison; Notebook 23 labels
+the longer endpoint interval separately.
+
+| Notebook and question | First cells / main outputs | Concrete trace | Safe settings; meaning of missing results |
+| --- | --- | --- | --- |
+| [00: source walkthrough](notebooks/00_source_walkthrough.ipynb) — how does a saved source become a row? | `vehicle-walkthrough-1`, then `real-source-example`; native and normalized fields | Ford listing `4474057`, VIN `3FA6P0D94ER264351`, asking price $14,590 | Choose another existing retained source; a missing field stays unknown. The later CSV is explicitly synthetic. |
+| [10: one inventory snapshot](notebooks/10_carvana_inventory.ipynb) — what did this query observe? | `inventory-setup`, `inventory-query`, `inventory-load`, `inventory-source`, `inventory-diagnostics` | Follow a vehicle from the saved Tesla query through raw fields and normalized columns | Change retained query/report paths together; incomplete pages cannot establish the full population. The long POST lesson is optional. |
+| [20: daily history](notebooks/20_carvana_history_analysis.ipynb) — which dates/queries, VINs and asking prices changed? | `daily-operating-view` settings, `daily-cycle-data`, `daily-operating-tables`, `daily-query-quality`; then changes, matched prices and source trace | September 8/9: 674 + 8 entries − 1 exit = 681 VINs; trace VIN `5YJ3E1EAXPF590130` | Change cutoff, retained tracking config or inspected VIN; a missing date/partial query is unavailable coverage, not zero inventory or sales. |
+| [22: native status validation](notebooks/22_carvana_sale_status_validation.ipynb) — what happened within the frozen cohort? | `pilot-settings`, `pilot-coverage`, `pilot-source-rows`, `pilot-results`, `prospective-followup-plan`, `pilot-evidence-timeline` | VIN `5YJ3E1EA7NF288274`, listing `4567173`: native Available-to-Sold interval and repeat clock | Change cutoff, example VIN, display flag or preview cap (1–12); failed/unvisited checks do not establish status or refresh native evidence. Preserve cohort files. |
+| [23: daily sales research](notebooks/23_carvana_daily_sales_research.ipynb) — how do proxies, revisions and validation checks compare? | `research-settings`, `methods`, `estimate-table`, `pending-and-revisions`, `exit-validation-results`, `followup-selection-table` | Exit VIN `5YJ3E1EA0MF058297`: last inventory row → native Sold capture → outstanding follow-up | Change cutoff, example VINs, seed or preview counts. Unknown transaction outcomes and unmatured absence estimates stay unavailable. Older/vendor studies follow the main workflow. |
+| [30: quarterly scenarios](notebooks/30_carvana_sales_expectations.ipynb) — what assumptions and evidence would a quarterly estimate require? | `quarter-setup`, `quarter-observations`, `quarter-inputs`, `quarter-synthetic-arithmetic` | Explicit synthetic scenario: 63 → 93 units, +30; inspect assumptions before arithmetic | Change dated analyst assumptions or matching retained inputs; an empty input/estimate is a visible evidence gap, not zero sales. Leave export settings empty for review. |
+| [21: optional intraday reference](notebooks/21_carvana_intraday_reference.ipynb) — what did the earlier experiment show? | `history-1`, `history-3`, then matched comparison/source cells | The saved same-day `baseline`/`repeat` experiment | Inspect existing historical config and evidence only; an invalid comparison is not an inventory change. Do not append it to daily history. |
+
+The reference evidence contains **one qualifying frozen-cohort transition** and
+**ten separate ranked exit checks with later native Sold labels**. Neither source
+confirms economic transactions. Notebook 23 retains exits through later sweeps,
+shows their completion/recheck clocks, and previews priority conflicts, due repeats,
+random new exits and random controls. Only genuine random frames receive inclusion
+probabilities. A few controls cannot measure a reliable missed-event rate; there
+is no company-sales multiplier. The bounded validation follow-up completes with a
+matched check at least seven days after its current-target baseline. A late first
+repeat can meet that minimum; a missed intermediate 24-hour check stays unobserved.
+Failures and replacement targets keep work outstanding. Frozen-cohort reminders
+remain separate.
+
+Notebook 23 also contains the optional [Clarity method experiment](docs/clarity_method_experiment.md).
+Review `clarity-method-settings` through `clarity-workbooks`: documented order rules,
+exit-rule replay, the stopped anonymous HTTP trial, and the supplied workbook vintages.
+Run All reads retained evidence and makes no live requests.
+
+For new detail checks, use the [browser batch guide](docs/browser_detail_batches.md).
+Notebook 23's `browser-batch-review` shows saved observations and unresolved visits
+before the next-check preview. The workflow uses connected Chrome and saves each
+visit separately; it is browser-assisted, with explicit recovery after interruption.
+
+## Collection commands (separate from notebook review)
 
 Run from `C:\Users\Sean\VscProjects\researchOS`:
 
@@ -25,32 +72,6 @@ The unchanged population is **Tesla Model 3, years 2020-2026, seven queries,
 ZIP 08542, location prefiltering omitted**. It is not national inventory or a
 representative sample. Use approximately the same local time on each intended day;
 a missed day stays missing. No live collection was performed during simplification.
-
-## 2. Open the existing analysis notebooks
-
-Start Jupyter with `powershell -File scripts/start_jupyter.ps1`, using the shared
-root `.venv`. Normal **Run All is offline and read-only**.
-
-| Notebook | Use it for |
-| --- | --- |
-| [20: inventory and vehicle review](notebooks/20_carvana_history_analysis.ipynb) | Population/dates/completeness → native inventory → matched VIN/price changes → composition and reductions by days since first observed → SQL/source trace |
-| [22: website-status evidence](notebooks/22_carvana_sale_status_validation.ipynb) | Cohort/repeat coverage → latest native statuses → first Sold/repeated Sold/reappearances → next checks → one evidence timeline; historical studies follow as optional sections |
-| [10: how the POST works](notebooks/10_carvana_inventory.ipynb) | Learn the request, response fields, pagination and parsing |
-| [21: earlier intraday reference](notebooks/21_carvana_intraday_reference.ipynb) | Inspect the retained morning experiment; it is separate from daily history |
-| [00: source introduction](notebooks/00_source_walkthrough.ipynb) | Existing learning examples and one retained source |
-| [30: sales expectations](notebooks/30_carvana_sales_expectations.ipynb) | Optional dated assumptions/scenarios; it does not establish measured sales |
-
-Notebook 20 now selects its input settings/cutoff/cycles once. Short explanations
-precede the joins and calculations. The mean-price table separates common-vehicle
-repricing from inventory composition; if prices are missing, the residual is
-explicitly labelled composition **plus price coverage**. The accounting sequence
-is visible, with a reconciliation to the actual total change.
-
-Notebook 22 keeps full audit tables available but leads with a compact status and
-attention view. Its frozen-cohort JSON captures remain separate from notebook 20's
-canonical manual check/review histories. Failed checks do not refresh native status
-or invent a between-check change. Saving a real page check remains an explicit
-manual action: [recording guide](docs/listing_checks.md), [pilot capture/import guide](docs/sale_pilot.md).
 
 ### Experimental four-model preview
 

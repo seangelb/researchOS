@@ -6,6 +6,7 @@ Unknown fields are omitted. Unsafe/malformed bodies have an explicit replay limi
 import hashlib
 import json
 import math
+from datetime import datetime
 from pathlib import Path
 import re
 
@@ -19,7 +20,8 @@ SOURCE_SCOPES = {'original_response_content': 'SHA-256 of retained Response.cont
 VEHICLE = {key: None for key in (
     'vehicleId', 'vin', 'year', 'make', 'model', 'parentModel', 'mileage',
     'isPurchasePending', 'vehicleLockType', 'vehiclePurchaseType',
-    'vehicleInventoryType', 'isOnDemand', 'transportCost')}
+    'vehicleInventoryType', 'isOnDemand', 'transportCost',
+    'previousPrice', 'priceUpdateDate')}
 VEHICLE['price'] = {'total': None}
 SOURCE_FIELDS = {
     'inventory': {'pagination': {key: None for key in (
@@ -46,6 +48,21 @@ def public_source(value, fields=SOURCE_FIELDS, *, key='', changes=None):
     keys and unsafe strings do not. A redacted value is never admitted as inventory.
     """
     changes = changes if changes is not None else []
+    if key == 'priceUpdateDate' and value is not None:
+        # Only the observed UTC timestamp form is public; validate the actual
+        # calendar/time too, without converting this native clock to our clock.
+        valid = False
+        if isinstance(value, str) and re.fullmatch(
+                r'\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z', value):
+            try:
+                datetime.fromisoformat(value[:-1] + '+00:00')
+                valid = True
+            except ValueError:
+                pass
+        if not valid:
+            changes.append('redacted_value')
+            return '[redacted string]' if isinstance(value, str) else None
+        return value
     if isinstance(value, dict):
         allowed = fields if isinstance(fields, dict) else {}
         if set(value) - set(allowed):

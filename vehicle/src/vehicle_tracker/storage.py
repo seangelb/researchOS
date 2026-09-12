@@ -43,7 +43,7 @@ def retain_bytes(content: bytes, raw_directory: Path, *, suffix: str = '.bin') -
         return path
     temporary = None
     try:
-        with tempfile.NamedTemporaryFile(dir=raw_directory, prefix=digest+'.',
+        with tempfile.NamedTemporaryFile(dir=raw_directory, prefix='capture.',
                                          suffix='.tmp', delete=False) as stream:
             temporary = Path(stream.name)
             stream.write(content)

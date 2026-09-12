@@ -1,4 +1,4 @@
-"""Experimental public-page evidence. Parsing is pure; only load_pilot reads files."""
+"""Experimental public-page evidence: pure parsing and read-only retained-file loaders."""
 import hashlib
 import json
 from pathlib import Path
@@ -206,6 +206,95 @@ def baseline_records(document, cohort, *, source):
     return rows
 
 
+def _read_capture(manifest, entry, *, available_at):
+    """Both frozen-cohort runs and diagnostic passes use the same integrity check."""
+    path = Path(manifest).parent / entry['file']
+    if path.resolve().parent != Path(manifest).parent.resolve():
+        raise ValueError('Capture must be inside its run directory')
+    data = path.read_bytes()
+    if hashlib.sha256(data).hexdigest() != entry['sha256']:
+        raise ValueError('Retained capture changed: ' + str(path))
+    capture = json.loads(data)
+    # Even a blocked/unsupported capture must belong to the selected target.
+    # parse_capture returns early for these failures, before native identity checks.
+    if capture.get('expected') != entry['expected']:
+        raise ValueError('Retained capture expected identity differs from selected target')
+    return parse_capture(capture, expected=entry['expected'],
+        available_at=available_at, source=str(path))
+
+
+def load_selection_plan(path, *, as_of):
+    """Read selected targets independently of a later pass, without creating membership.
+
+    These local plans record selection availability at prepared_at unless a separate
+    available_at is supplied. A plan is an intention, never a completed page check.
+    """
+    path = Path(path)
+    plan = json.loads(path.read_text(encoding='utf-8'))
+    selected_at = _aware(plan['prepared_at'])
+    available_at = _aware(plan.get('available_at', plan['prepared_at']))
+    if available_at < selected_at:
+        raise ValueError('Plan availability cannot precede selection')
+    if max(selected_at, available_at) > _aware(as_of):
+        return pd.DataFrame()
+    rows = []
+    for page in plan['pages']:
+        if not page.get('selected_for_check', True):
+            continue
+        retailer, vin = page.get('retailer', 'carvana'), page['vin']
+        listing_id = page.get('followup_listing_id', page.get('listing_id'))
+        url = page.get('followup_url', page.get('url'))
+        if (retailer != 'carvana' or not re.fullmatch(r'[A-HJ-NPR-Z0-9]{17}', vin)
+                or not isinstance(listing_id, str) or _url_id(url) != listing_id
+                or not page['selection_reason'].strip()):
+            raise ValueError('Invalid selection plan identity, URL or reason')
+        rows.append(dict(retailer=retailer, vin=vin, listing_id=listing_id, url=url,
+            selected_at=selected_at, available_at=available_at,
+            selection_reason=page['selection_reason'], plan_source=str(path)))
+    result = pd.DataFrame(rows)
+    if not result.empty and result.duplicated(['retailer', 'vin']).any():
+        raise ValueError('Selection plan repeats a retailer/VIN')
+    return result
+
+
+def load_research_pass(report_path, selected, cohorts, *, as_of):
+    """Validate a diagnostic pass against its independently loaded selection plan.
+
+    Return no report or observations before report availability. Cohort flags are
+    checked against frozen membership; validation-only vehicles stay separate.
+    """
+    report_path = Path(report_path)
+    report = json.loads(report_path.read_text(encoding='utf-8'))
+    available_at, cutoff = _aware(report['available_at']), _aware(as_of)
+    if available_at > cutoff:
+        return None, pd.DataFrame()
+    selection_at = _aware(report['selection_as_of'])
+    if selected.empty or selection_at > available_at:
+        raise ValueError('Pass has no available prior selection plan')
+    if not (selected.selected_at.eq(selection_at) & selected.available_at.le(available_at)).all():
+        raise ValueError('Pass and selection plan clocks differ')
+    expected_rows = selected.set_index(['retailer', 'vin', 'listing_id'])
+    members = {(v['retailer'], v['vin']) for c in known_disjoint_cohorts(cohorts, as_of=as_of)
+        for v in c['vehicles']}
+    rows, seen = [], set()
+    for entry in report['captures']:
+        expected = entry['expected']
+        key = expected['retailer'], expected['vin'], expected['listing_id']
+        if key not in expected_rows.index or key[:2] in seen:
+            raise ValueError('Pass identity is unselected or repeated')
+        if (entry['selection_reason'] != expected_rows.loc[key, 'selection_reason']
+                or entry['frozen_cohort_member'] != (key[:2] in members)):
+            raise ValueError('Pass selection reason or frozen membership differs')
+        row = _read_capture(report_path, entry, available_at=available_at)
+        if _aware(row['checked_at']) < selection_at:
+            raise ValueError('Page check precedes selection')
+        row.update(selection_reason=entry['selection_reason'],
+            frozen_cohort_member=entry['frozen_cohort_member'])
+        rows.append(row)
+        seen.add(key[:2])
+    return report, pd.DataFrame(rows)
+
+
 def load_pilot(root, cohort, *, as_of):
     """Read-only replay of optional evidence; verify retained capture hashes."""
     root, cutoff = Path(root), _aware(as_of)
@@ -226,14 +315,7 @@ def load_pilot(root, cohort, *, as_of):
             if (entry['expected']['retailer'], entry['expected']['vin']) not in {
                     (v['retailer'], v['vin']) for v in cohort['vehicles']}:
                 raise ValueError('Retained run contains a VIN outside its frozen cohort')
-            path = manifest.parent / entry['file']
-            if path.resolve().parent != manifest.parent.resolve():
-                raise ValueError('Capture must be inside its run directory')
-            data = path.read_bytes()
-            if hashlib.sha256(data).hexdigest() != entry['sha256']:
-                raise ValueError('Retained capture changed: ' + str(path))
-            rows.append(parse_capture(json.loads(data), expected=entry['expected'],
-                available_at=run['available_at'], source=str(path)))
+            rows.append(_read_capture(manifest, entry, available_at=run['available_at']))
     if not rows:
         return pd.DataFrame()
     result = pd.DataFrame(rows)

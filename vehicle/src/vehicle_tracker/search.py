@@ -50,7 +50,10 @@ def project_response(data, request, *, observed_at):
     safe_request = {k: request[k] for k in ('filters', 'pagination', 'sortBy', 'zip5')}
     if 'requestedFeatures' in request:
         safe_request['requestedFeatures'] = request['requestedFeatures']
-    vehicles = [{**{k: v.get(k) for k in FIELDS}, 'price': {'total': v.get('price', {}).get('total')}}
+    # Preserve optional native asking-price history without changing older projections.
+    vehicles = [{**{k: v.get(k) for k in FIELDS},
+                 **{k: v[k] for k in ('previousPrice', 'priceUpdateDate') if k in v},
+                 'price': {'total': v.get('price', {}).get('total')}}
                 for v in inventory['vehicles']]
     return dict(capture_method='carvana_search_projection', page_url='https://www.carvana.com/cars',
                 endpoint=ENDPOINT, captured_at_utc=observed_at, requested_zip=request['zip5'],
