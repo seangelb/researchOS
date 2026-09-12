@@ -1,10 +1,19 @@
 # Retained gaming data recovery
 
-The user authorized a fresh collection on September 12, 2026. The current dataset is
-`data/staging/rebuild_20260912T191234Z/gaming_current.sqlite`; notebook 94 reads it
-after validating its database hash. Notebook 90 now explores that same capture.
-See [the rebuild record](data_rebuild_20260912.md) for counts, verification, coverage
-limitations, and the separate ZIP backup containing database and source bytes.
+The user authorized a fresh collection on September 12, 2026. The latest dataset is
+`data/staging/refresh_20260912T201854Z/gaming_current.sqlite`: **19,806 observations**,
+34 state/product series, and 1,035 verified referenced source files. Its SHA-256 is
+`751e135c083f66d025ca4d03116021215ac136518ba24b2093f135af044df3ee`.
+Notebooks 90 and 94–96 read this capture. See the [workflow guide](flut_workflow.md)
+for collection exceptions and the independently restored data backup.
+
+The initial 19,749-row rebuild at
+`data/staging/rebuild_20260912T191234Z/gaming_current.sqlite` remains unchanged.
+The latest run copied that database before refreshing MA, MI, NY and KY; the other
+retained series were not rechecked by that selected run. The
+[initial rebuild record](data_rebuild_20260912.md) remains the record of the broad
+collection and its gaps. The 57 added rows are bounded Kentucky operator/total
+transcriptions, not 57 newly reported periods.
 
 This recovers a usable current research dataset. It does not recreate any of the
 exact historical snapshots below or their point-in-time availability. Notebooks

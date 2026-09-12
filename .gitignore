@@ -59,5 +59,6 @@ vehicle/data/analysis/
 gaming/data/**/*.sqlite*
 gaming/data/**/*.db
 gaming/data/staging/
+gaming/data/expectations/
 vehicle/data/**/*.sqlite*
 vehicle/data/**/*.db

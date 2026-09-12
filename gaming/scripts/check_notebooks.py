@@ -18,7 +18,7 @@ import tempfile
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
-ACTIVE_NOTEBOOKS = ("00", "10", "11", "20", "30", "31", "90", "91", "92", "93", "94")
+ACTIVE_NOTEBOOKS = ("00", "10", "11", "20", "30", "31", "90", "91", "92", "93", "94", "95", "96")
 APPROVAL_BLOCK = "FAIL CLOSED: analyst-approval binding mismatch:"
 
 

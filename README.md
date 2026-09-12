@@ -31,11 +31,16 @@ source references resolve within their own project, not relative to the Git root
 
 ## Current data availability
 
-The September 12 refresh rebuilt a current gaming database from the existing official
-source collectors. Start with [FLUT current data](gaming/notebooks/94_flut_current_data.ipynb)
-for coverage, latest FanDuel observations, and reconciled New York weekly activity.
-Notebook 90 explores the same fresh dataset. See the [refresh record](gaming/docs/data_rebuild_20260912.md)
-for validation, reporting gaps, and the separate data backup.
+The latest September 12 gaming capture contains **19,806 observations across 34
+state/product series**, including recovered Kentucky operator history. Start with
+[FLUT current data](gaming/notebooks/94_flut_current_data.ipynb), then the
+[quarterly scorecard](gaming/notebooks/95_flut_quarterly_scorecard.ipynb) and
+[expectations review](gaming/notebooks/96_flut_expectations_review.ipynb).
+The [current analyst review](gaming/docs/flut_current_quarter_review_20260912.md)
+explains the July results and next research priorities. The
+[workflow guide](gaming/docs/flut_workflow.md) records refresh, validation, backup,
+and the first frozen reference. Notebook 20 previews a fresh capture and performs
+validated collection and a tested backup when explicitly enabled.
 
 The exact historical original, staging, and approved-candidate databases remain
 missing. Studies 91–93 retain their original gates and historical outputs; fresh

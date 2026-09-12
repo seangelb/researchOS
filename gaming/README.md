@@ -1,6 +1,6 @@
 # researchOS: official state gaming revenue
 
-**September 12 refresh:** paths in this guide are relative to `gaming/`. A new current database and source archive have been collected; start with notebook 94 and the [refresh record](docs/data_rebuild_20260912.md). The exact earlier approved snapshots remain missing; see [data recovery](docs/data_recovery.md). Use the root [launch and validation commands](../README.md).
+**September 12 refresh:** paths in this guide are relative to `gaming/`. The latest capture has 19,806 observations; start with notebooks 94 → 95 → 96 and the [current analyst review](docs/flut_current_quarter_review_20260912.md). The [workflow guide](docs/flut_workflow.md) explains refresh, backup, and dated expectations. The exact earlier approved snapshots remain missing; see [data recovery](docs/data_recovery.md). Use the root [launch and validation commands](../README.md).
 
 
 Small Python modules collect official online sports-betting and online-casino reports.
@@ -11,6 +11,12 @@ Use pandas in Jupyter to inspect the results. No service or separate application
 - **`notebooks/94_flut_current_data.ipynb` — start here.** Read the validated September
   12 capture, source coverage and exceptions, latest native FanDuel rows, and New York
   weekly handle share reconciled to official totals. This is current evidence for review.
+- **`notebooks/95_flut_quarterly_scorecard.ipynb` — comparable quarterly evidence.**
+  MA sportsbook and MI sportsbook/casino, matching months in both years, native
+  definitions, market share and gross hold. Q3 currently contains July only.
+- **`notebooks/96_flut_expectations_review.ipynb` — evidence and expectations.**
+  Keep the derived management reference separate from explicit analyst scenarios;
+  optionally freeze a dated case and later compare the same-scope official actual.
 - **`notebooks/90_consolidated_ggr.ipynb` — daily analysis.** Change states, product,
   metric, dates, and frequency, then Restart Kernel and Run All. It reads SQLite
   without downloading or writing. Optional CSV export is disabled by default.
@@ -21,7 +27,9 @@ Use pandas in Jupyter to inspect the results. No service or separate application
 - **`notebooks/93_flut_online_casino_signal.ipynb` — FanDuel online casino / cross-product.**
   MI iGaming revenue-share exploratory analysis and OSB vs casino direction table.
 - **`notebooks/20_run_all_collectors.ipynb` — updates.** Choose explicit `recent` or
-  `history` mode and inspect the database destination. Recent mode supports MA monthly
+  `history` mode and inspect the new capture directory and external ZIP destination.
+  The wrapper validates retained bytes, preserves the base database, and restores
+  the backup to check it. Recent mode supports MA monthly
   PDFs and NY weekly workbooks. Both `run_downloads` and `allow_database_writes` must
   be true to collect; both default to false. Unsupported recent sources raise a clear
   error. Use `selected_sources = None` only with explicit history mode for all registered
@@ -67,6 +75,9 @@ Notebook 90 reads SQLite, consolidates observations, and displays tables and cha
 | `src/variant_gaming/common.py` | Download, file hashing, dates, money parsing |
 | `src/variant_gaming/collect.py` | Explicit source mapping and full-history updates |
 | `src/variant_gaming/recent.py` | Small MA/NY recent refresh and per-report results |
+| `src/variant_gaming/refresh.py` | Fresh capture, source validation, verified backup and restore |
+| `src/variant_gaming/flut_scorecard.py` | Native definitions and same-window FanDuel comparisons |
+| `src/variant_gaming/flut_expectations.py` | Separate company references, scenarios and dated outcomes |
 | `src/variant_gaming/storage.py` | SQLite reads and writes |
 | `src/variant_gaming/consolidate.py` | Source conflicts, labeled sums, CSV exports |
 | `tests/fixtures/` | Small saved reports for parser tests |
@@ -109,22 +120,21 @@ observed ranges, missing periods, and exact reasons for gaps. The inventory has 
 rows (50 states plus DC, two products). It is a coverage map, not a claim of 102
 collected series or complete national GGR. Collection logs are in `data/staging/`.
 
-In notebooks 00, 10, 11, 20, and 90, select one database with:
+In read-only analysis notebooks, select one database with:
 
 ```python
-database_file = "data/staging/rebuild_20260912T191234Z/gaming_current.sqlite"  # validated September 12 capture
+database_file = "data/staging/refresh_20260912T201854Z/gaming_current.sqlite"  # latest validated September 12 capture
 # The earlier original/study databases remain missing; their hashes are in docs/data_recovery.md.
 ```
 
-Notebooks 00, 10, 11, and 90 open the selected database read-only. Notebook 20 defaults to staging;
-set `selected_sources` and `collection_mode`, review the displayed plan, and explicitly
-enable both `run_downloads` and `allow_database_writes`. The staging database is local and ignored by Git, like raw captures.
-To create another staging copy, use SQLite's backup API with a read-only source;
-do not overwrite an existing staging file that contains work.
-
-For the next collection, choose a new dated database destination in notebook 20.
-Keep this validated capture immutable and back up the new database, raw files,
-configuration, and collection/validation logs together before using its results.
+Notebooks 00, 10, 11, and 90 open the selected database read-only. Notebook 20 uses
+`base_database_file` for its optional seed, creates a new dated staging directory,
+and requires a new ZIP outside the repository. Set `selected_sources` and
+`collection_mode`, review the displayed plan, then explicitly enable both
+`run_downloads` and `allow_database_writes`. The validated base stays unchanged.
+Databases, raw captures, and frozen expectations are local and ignored by Git;
+the wrapper backs them up with configuration, parser code and run receipts.
+Read every collection exception before using a new capture. See [refresh instructions](docs/flut_workflow.md).
 
 The earlier staging corrections below describe the historical study. Use the new
 capture's coverage table for current dates and exceptions. Parser definitions still matter:
@@ -154,8 +164,11 @@ payments or contractual state shares, which are not interchangeable with tax acc
 
 Eight image/broken-font reports have explicit visual transcriptions. The CSV records
 the page, native figures, source URL, and hash. Changed bytes require another check.
-Kentucky currently uses two monthly totals from one meeting packet; it is a partial
-manual collection, not a general Kentucky report parser.
+Kentucky retains the two earlier monthly totals plus 57 operator/total rows for
+April–June 2025 and 2026 from three hash-bound official packets. The new rows have
+been visually checked against every financial cell, but remain manual evidence
+without analyst approval. This is partial history, not a general Kentucky report
+parser. See [Kentucky recovery](docs/kentucky_recovery_20260912.md).
 
 ## Trace or repair one observation
 
@@ -269,7 +282,9 @@ explanatory text. The existing Python/pandas/SQLite/Jupyter architecture remains
 
 ## Learn, refresh, analyze
 
-Start with **31 → 20 → 90 → 91 → 92 → 93**. Notebook 31 shows the retained official
+Start with **94 → 95 → 96** for current research, or **31 → 20 → 90** to learn collection.
+Historical approval-bound studies 91–93 remain blocked by missing exact snapshots.
+Notebook 31 shows the retained official
 MA report, extracted rows, normalized columns, missing values, and reconciliation
 differences before analysis. Notebook 20 explains collection without executing it by
 default. Notebook 90 exposes metric selection, coverage, conflicts, and source tracing.

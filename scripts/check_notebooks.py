@@ -126,7 +126,7 @@ def main() -> int:
         if not directory.is_dir():
             parser.error(f"Notebook directory does not exist: {directory}")
         if name == "gaming":
-            active = ("00", "10", "11", "20", "30", "31", "90", "91", "92", "93", "94")
+            active = ("00", "10", "11", "20", "30", "31", "90", "91", "92", "93", "94", "95", "96")
             notebooks = [p for p in sorted(directory.glob("*.ipynb")) if p.name[:2] in active]
             missing = [prefix for prefix in active if not any(p.name.startswith(prefix + "_") for p in notebooks)]
             if missing:

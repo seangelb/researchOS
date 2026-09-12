@@ -3,8 +3,10 @@
 from datetime import datetime, timezone
 from pathlib import Path
 
+import pandas as pd
 import pytest
 
+from variant_gaming.denominators import denominator_provenance
 from variant_gaming.states.michigan import (
     CASINO_VERTICAL,
     SPORTS_REPORTED_REVENUE_NAME,
@@ -53,6 +55,13 @@ def test_parse_casino_maps_gross_and_adjusted() -> None:
     )
     assert (rows["channel"] == "online").all()
     assert (rows["vertical"] == CASINO_VERTICAL).all()
+    assert rows["reported_revenue_name"].eq(
+        "Gross Receipts (gross_revenue); Adjusted Gross (adjusted_revenue)"
+    ).all()
+    money = ["handle", "gross_revenue", "adjusted_revenue", "tax"]
+    pd.testing.assert_frame_equal(rows[money], parsed[money])
+    statewide = rows[rows["row_type"].eq("official_statewide_total")]
+    assert statewide.apply(denominator_provenance, axis=1).eq("printed:MI:ok").all()
 
 
 def test_sports_normalized_reported_revenue_name() -> None:
@@ -69,6 +78,11 @@ def test_sports_normalized_reported_revenue_name() -> None:
         retrieved_at=datetime(2026, 9, 2, tzinfo=timezone.utc),
     )
     assert (rows["reported_revenue_name"] == SPORTS_REPORTED_REVENUE_NAME).all()
+    assert SPORTS_REPORTED_REVENUE_NAME == (
+        "Gross Receipts (gross_revenue); Adjusted Gross (adjusted_revenue)"
+    )
+    money = ["handle", "gross_revenue", "adjusted_revenue", "tax"]
+    pd.testing.assert_frame_equal(rows[money], parsed[money])
 
 
 def test_discover_filters_sports_vs_gaming() -> None:

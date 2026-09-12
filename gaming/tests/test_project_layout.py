@@ -24,7 +24,7 @@ def test_project_root_does_not_fall_back_to_unrelated_directory(monkeypatch, tmp
         project_root()
 
 
-@pytest.mark.parametrize('prefix', ['00', '10', '11', '20', '30', '31', '44', '45', '90', '91', '92', '93', '94'])
+@pytest.mark.parametrize('prefix', ['00', '10', '11', '20', '30', '31', '44', '45', '90', '91', '92', '93', '94', '95', '96'])
 @pytest.mark.parametrize('start', [REPOSITORY, GAMING, GAMING / 'notebooks'])
 def test_actual_notebook_bootstrap_finds_gaming(monkeypatch, prefix, start):
     notebook = next((GAMING / 'notebooks').glob(f'{prefix}_*.ipynb'))

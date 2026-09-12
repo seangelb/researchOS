@@ -1,0 +1,211 @@
+{
+  "schema_version": "flut_company_reference_v1",
+  "sources": [
+    {
+      "source_id": "flutter_q2_2026",
+      "source_file": "data/raw/FLUT/2026-09-12/d86526afd29f043ab4fade29b9528bfade051deb7ab49ce38792e43389ff4678.pdf",
+      "source_url": "https://flutter.com/media/g23an0ae/flutter-q2-2026-earnings-release.pdf",
+      "source_sha256": "d86526afd29f043ab4fade29b9528bfade051deb7ab49ce38792e43389ff4678",
+      "published_on": "2026-08-05",
+      "captured_at": "2026-09-12T20:09:25.695951+00:00"
+    },
+    {
+      "source_id": "flutter_q3_2025",
+      "source_file": "data/raw/FLUT/2026-09-12/82b17a9032a1b5f7563f40d3d51d017cac8a93ad2c0cc68170ed23366dafbb33.pdf",
+      "source_url": "https://flutter.com/media/ze1o1pxl/q3-2025-earnings-release-final.pdf",
+      "source_sha256": "82b17a9032a1b5f7563f40d3d51d017cac8a93ad2c0cc68170ed23366dafbb33",
+      "published_on": "2025-11-12",
+      "captured_at": "2026-09-12T20:09:58.059082+00:00"
+    }
+  ],
+  "reported_actuals": [
+    {
+      "period": "2025Q3",
+      "scope": "flutter_us_segment",
+      "metric": "sportsbook_revenue",
+      "value": "783",
+      "unit": "USD_millions",
+      "source_id": "flutter_q3_2025",
+      "source_locator": "US/International/Group table; US column; us_sportsbook_revenue"
+    },
+    {
+      "period": "2025Q3",
+      "scope": "flutter_us_segment",
+      "metric": "igaming_revenue",
+      "value": "530",
+      "unit": "USD_millions",
+      "source_id": "flutter_q3_2025",
+      "source_locator": "US/International/Group table; US column; us_igaming_revenue"
+    },
+    {
+      "period": "2025Q3",
+      "scope": "flutter_us_segment",
+      "metric": "other_revenue",
+      "value": "55",
+      "unit": "USD_millions",
+      "source_id": "flutter_q3_2025",
+      "source_locator": "US/International/Group table; US column; us_other_revenue"
+    },
+    {
+      "period": "2025Q3",
+      "scope": "flutter_us_segment",
+      "metric": "revenue",
+      "value": "1368",
+      "unit": "USD_millions",
+      "source_id": "flutter_q3_2025",
+      "source_locator": "US/International/Group table; US column; us_total_revenue"
+    },
+    {
+      "period": "2025Q3",
+      "scope": "flutter_us_segment",
+      "metric": "adjusted_ebitda",
+      "value": "51",
+      "unit": "USD_millions",
+      "source_id": "flutter_q3_2025",
+      "source_locator": "US/International/Group table; US column; us_adjusted_ebitda"
+    },
+    {
+      "period": "2025Q3",
+      "scope": "flutter_us_segment",
+      "metric": "sportsbook_handle",
+      "value": "10653",
+      "unit": "USD_millions",
+      "source_id": "flutter_q3_2025",
+      "source_locator": "US/International/Group table; US column; us_sportsbook_handle"
+    },
+    {
+      "period": "2026Q2",
+      "scope": "flutter_us_segment",
+      "metric": "sportsbook_revenue",
+      "value": "1039",
+      "unit": "USD_millions",
+      "source_id": "flutter_q2_2026",
+      "source_locator": "US/International/Group table; US column; us_sportsbook_revenue"
+    },
+    {
+      "period": "2026Q2",
+      "scope": "flutter_us_segment",
+      "metric": "igaming_revenue",
+      "value": "577",
+      "unit": "USD_millions",
+      "source_id": "flutter_q2_2026",
+      "source_locator": "US/International/Group table; US column; us_igaming_revenue"
+    },
+    {
+      "period": "2026Q2",
+      "scope": "flutter_us_segment",
+      "metric": "other_revenue",
+      "value": "67",
+      "unit": "USD_millions",
+      "source_id": "flutter_q2_2026",
+      "source_locator": "US/International/Group table; US column; us_other_revenue"
+    },
+    {
+      "period": "2026Q2",
+      "scope": "flutter_us_segment",
+      "metric": "revenue",
+      "value": "1683",
+      "unit": "USD_millions",
+      "source_id": "flutter_q2_2026",
+      "source_locator": "US/International/Group table; US column; us_total_revenue"
+    },
+    {
+      "period": "2026Q2",
+      "scope": "flutter_us_segment",
+      "metric": "adjusted_ebitda",
+      "value": "119",
+      "unit": "USD_millions",
+      "source_id": "flutter_q2_2026",
+      "source_locator": "US/International/Group table; US column; us_adjusted_ebitda"
+    },
+    {
+      "period": "2026Q2",
+      "scope": "flutter_us_segment",
+      "metric": "sportsbook_handle",
+      "value": "11958",
+      "unit": "USD_millions",
+      "source_id": "flutter_q2_2026",
+      "source_locator": "US/International/Group table; US column; us_sportsbook_handle"
+    },
+    {
+      "period": "2025Q2",
+      "scope": "flutter_us_segment",
+      "metric": "sportsbook_revenue",
+      "value": "1219",
+      "unit": "USD_millions",
+      "source_id": "flutter_q2_2026",
+      "source_locator": "US/International/Group table; US column; us_sportsbook_revenue"
+    },
+    {
+      "period": "2025Q2",
+      "scope": "flutter_us_segment",
+      "metric": "igaming_revenue",
+      "value": "507",
+      "unit": "USD_millions",
+      "source_id": "flutter_q2_2026",
+      "source_locator": "US/International/Group table; US column; us_igaming_revenue"
+    },
+    {
+      "period": "2025Q2",
+      "scope": "flutter_us_segment",
+      "metric": "other_revenue",
+      "value": "65",
+      "unit": "USD_millions",
+      "source_id": "flutter_q2_2026",
+      "source_locator": "US/International/Group table; US column; us_other_revenue"
+    },
+    {
+      "period": "2025Q2",
+      "scope": "flutter_us_segment",
+      "metric": "revenue",
+      "value": "1791",
+      "unit": "USD_millions",
+      "source_id": "flutter_q2_2026",
+      "source_locator": "US/International/Group table; US column; us_total_revenue"
+    },
+    {
+      "period": "2025Q2",
+      "scope": "flutter_us_segment",
+      "metric": "adjusted_ebitda",
+      "value": "400",
+      "unit": "USD_millions",
+      "source_id": "flutter_q2_2026",
+      "source_locator": "US/International/Group table; US column; us_adjusted_ebitda"
+    },
+    {
+      "period": "2025Q2",
+      "scope": "flutter_us_segment",
+      "metric": "sportsbook_handle",
+      "value": "11699",
+      "unit": "USD_millions",
+      "source_id": "flutter_q2_2026",
+      "source_locator": "US/International/Group table; US column; us_sportsbook_handle"
+    }
+  ],
+  "management_reference": {
+    "kind": "derived_management_reference",
+    "period": "2026Q3",
+    "scope": "flutter_us_segment",
+    "metric": "revenue",
+    "unit": "USD_millions",
+    "value_low": "1425",
+    "value_mid": "1480",
+    "value_high": "1535",
+    "fy_guidance_low": "7125",
+    "fy_guidance_mid": "7400",
+    "fy_guidance_high": "7675",
+    "q3_approximate_fraction": "0.20",
+    "source_id": "flutter_q2_2026",
+    "source_locator": "US guidance paragraph and Updated 2026 guidance table",
+    "formula": "FY US revenue guidance multiplied by the approximately 20% Q3 phasing",
+    "range_limitation": "The derived band applies an approximate phasing factor to FY guidance endpoints; it is not a separately disclosed Q3 range or a calibrated statistical interval.",
+    "adjusted_ebitda_guidance": "approximately breakeven; no exact point estimate",
+    "approval_status": "not_a_house_forecast"
+  },
+  "notes": [
+    "State evidence is native USD; issuer references are USD millions.",
+    "US segment totals are not domestic FanDuel state sums. Geography, brands, promotions and reporting timing require explicit reconciliation.",
+    "No quarterly FanDuel product split, national state coverage weight, GGR-to-net factor, or model approval is supplied.",
+    "Publication dates come from release headers; exact historical public-release timestamps have not been inferred."
+  ]
+}
