@@ -14,7 +14,7 @@ venv/
 # Jupyter
 .ipynb_checkpoints/
 */.ipynb_checkpoints/
-notebooks/*.executed.ipynb
+gaming/notebooks/*.executed.ipynb
 
 # OS / editor
 .DS_Store
@@ -22,28 +22,28 @@ Thumbs.db
 .idea/
 .vscode/
 
-data/gaming.sqlite
+gaming/data/gaming.sqlite
 # Temporary nationwide validation database stays local.
-data/staging/*.sqlite*
+gaming/data/staging/*.sqlite*
 # Candidate / replay artifacts stay local (never replace production DB from here)
-data/candidates/
+gaming/data/candidates/
 # Captured data stays local by default (immutable artifacts can be large)
-data/raw/**
-data/processed/**
-!data/raw/
-!data/raw/ny/
-!data/raw/ny/.gitkeep
-!data/raw/ny/operators/
-!data/raw/ny/operators/.gitkeep
-!data/processed/
-!data/processed/ny/
-!data/processed/ny/.gitkeep
-!data/processed/ny/operators/
-!data/processed/ny/operators/.gitkeep
-!data/raw/IL/
-!data/raw/IL/.gitkeep
-!config/
-!config/state_gaming_source_inventory.csv
+gaming/data/raw/**
+gaming/data/processed/**
+!gaming/data/raw/
+!gaming/data/raw/ny/
+!gaming/data/raw/ny/.gitkeep
+!gaming/data/raw/ny/operators/
+!gaming/data/raw/ny/operators/.gitkeep
+!gaming/data/processed/
+!gaming/data/processed/ny/
+!gaming/data/processed/ny/.gitkeep
+!gaming/data/processed/ny/operators/
+!gaming/data/processed/ny/operators/.gitkeep
+!gaming/data/raw/IL/
+!gaming/data/raw/IL/.gitkeep
+!gaming/config/
+!gaming/config/state_gaming_source_inventory.csv
 
 # Vehicle captures and databases remain local.
 vehicle/data/raw/**
@@ -54,3 +54,10 @@ vehicle/notebooks/*.executed.ipynb
 vehicle/data/experiments/
 vehicle/.browser_profiles/
 vehicle/data/analysis/
+
+# Retained research data is local, including copied or renamed snapshots.
+gaming/data/**/*.sqlite*
+gaming/data/**/*.db
+gaming/data/staging/
+vehicle/data/**/*.sqlite*
+vehicle/data/**/*.db

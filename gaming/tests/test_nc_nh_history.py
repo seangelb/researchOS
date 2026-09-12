@@ -44,8 +44,9 @@ def _row(**overrides):
 
 
 def test_source_files_have_no_statewide_delete() -> None:
-    nc = Path("src/variant_gaming/states/north_carolina.py").read_text(encoding="utf-8")
-    nh = Path("src/variant_gaming/states/new_hampshire.py").read_text(encoding="utf-8")
+    states = Path(__file__).resolve().parents[1] / "src/variant_gaming/states"
+    nc = (states / "north_carolina.py").read_text(encoding="utf-8")
+    nh = (states / "new_hampshire.py").read_text(encoding="utf-8")
     assert "DELETE FROM gaming_results" not in nc
     assert "DELETE FROM gaming_results" not in nh
 

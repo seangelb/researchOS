@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "variant"
 version = "0.2.0"
-description = "Learning-first notebooks and small collectors for official U.S. gaming revenue."
+description = "Notebook-first gaming and vehicle research with pandas and SQLite."
 readme = "README.md"
 requires-python = ">=3.11,<3.12"
 dependencies = [
@@ -25,8 +25,8 @@ dependencies = [
 dev = ["pytest>=8.0"]
 
 [tool.setuptools.packages.find]
-where = ["src"]
+where = ["gaming/src", "vehicle/src"]
 
 [tool.pytest.ini_options]
-testpaths = ["tests", "vehicle/tests"]
-pythonpath = ["src", "vehicle/src"]
+testpaths = ["gaming/tests", "vehicle/tests"]
+pythonpath = ["gaming/src", "vehicle/src"]

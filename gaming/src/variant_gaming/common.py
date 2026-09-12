@@ -15,12 +15,13 @@ USER_AGENT = "researchOS-variant-gaming/1.0 (+official regulator downloads)"
 
 
 def project_root() -> Path:
-    """Return repo root whether the cwd is the repo or notebooks/."""
+    """Find the gaming project; retained source paths stay relative to gaming/."""
     here = Path.cwd().resolve()
     for candidate in [here, *here.parents]:
-        if (candidate / "config" / "state_gaming_source_inventory.csv").exists():
-            return candidate
-    return here
+        for root in (candidate, candidate / "gaming"):
+            if (root / "config" / "state_gaming_source_inventory.csv").is_file():
+                return root
+    raise FileNotFoundError("Cannot locate gaming project; launch from researchOS or gaming/.")
 
 
 def utc_now() -> datetime:
