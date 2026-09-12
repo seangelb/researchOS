@@ -14,7 +14,7 @@ database hashes or historical publication clocks, and it changes no valuation.
 
 ## Use the rebuilt data
 
-- Start with [notebook 94](../notebooks/94_flut_current_data.ipynb): coverage and
+- Start with [notebook 94](../notebooks/94_gaming_industry_update.ipynb): coverage and
   observation age, native FanDuel rows, and recent New York weekly handle share.
 - Use [notebook 90](../notebooks/90_consolidated_ggr.ipynb) to explore states,
   products, dates, and separate revenue measures. Its stale saved outputs were cleared.

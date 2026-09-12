@@ -1,3 +1,7 @@
+# Historical FLUT experiment workflow — September 12, 2026
+
+This is a retained record of the earlier 94/95/96 workflow and frozen reference. The current workflow is [the gambling industry guide](industry_workflow.md); 95/96 are optional experiments.
+
 # FLUT research workflow — September 12, 2026
 
 Use **94 → 95 → 96**: inspect current coverage, compare FanDuel with the same

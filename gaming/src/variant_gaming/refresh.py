@@ -29,6 +29,63 @@ def file_sha256(path):
         return hashlib.file_digest(stream, "sha256").hexdigest()
 
 
+def frozen_database_sha256(path):
+    """Hash only a closed capture: SQLite sidecars are not bound by a DB hash."""
+    for suffix in ("-wal", "-journal"):
+        sidecar = Path(str(path) + suffix)
+        if sidecar.exists() and sidecar.stat().st_size:
+            raise ValueError("A frozen snapshot must have no nonempty WAL or journal")
+    return file_sha256(path)
+
+
+def load_validated_snapshot(*, root, database, as_of=None, expected_sha256=None,
+                            data_capture_at=None):
+    """Load an explicitly selected capture, checking receipts, clocks and raw bytes.
+
+    Returns observations, coverage, original manifest, fresh validation and binding.
+    This is read-only; connections always close. No latest-file selection or repair.
+    The capture clock is the completed run, not historical public availability.
+    """
+    root, database = Path(root).resolve(), Path(database).resolve()
+    digest = frozen_database_sha256(database)
+    if expected_sha256 is not None and digest != expected_sha256:
+        raise ValueError("Database differs from the explicitly selected snapshot hash")
+    documents, hashes = {}, {}
+    for name in ("run_manifest.json", "validation.json"):
+        raw = database.with_name(name).read_bytes()
+        documents[name], hashes[name] = json.loads(raw), hashlib.sha256(raw).hexdigest()
+        if documents[name].get("database_sha256") != digest:
+            raise ValueError("capture receipt does not bind the current database")
+    manifest = documents["run_manifest.json"]
+    capture = pd.Timestamp(manifest.get("finished_at"))
+    cutoff = pd.Timestamp(as_of if as_of is not None else datetime.now(timezone.utc))
+    if pd.isna(capture) or capture.tzinfo is None or pd.isna(cutoff) or cutoff.tzinfo is None:
+        raise ValueError("Capture and information cutoff require explicit timezone timestamps")
+    if cutoff > pd.Timestamp.now(tz="UTC"):
+        raise ValueError("Information cutoff cannot be in the future")
+    if capture > cutoff:
+        raise ValueError("Snapshot was captured after the information cutoff")
+    if data_capture_at is not None and pd.Timestamp(data_capture_at) != capture:
+        raise ValueError("supplied data capture time differs from run_manifest.finished_at")
+    validation, sources = validate_snapshot(root=root, database=database, as_of=capture)
+    with closing(connect_readonly(database)) as connection:
+        observations = pd.read_sql_query("SELECT * FROM gaming_results", connection)
+        coverage = pd.read_sql_query("SELECT * FROM source_coverage", connection)
+    for name, document in documents.items():
+        count = document.get("validated_observations", document.get("observation_count"))
+        if count is not None and count != validation["validated_observations"]:
+            raise ValueError(f"capture receipt observation count differs: {name}")
+        if file_sha256(database.with_name(name)) != hashes[name]:
+            raise ValueError("capture receipt changed during validation")
+    if (validation["database_sha256"] != digest or frozen_database_sha256(database) != digest
+            or len(observations) != validation["validated_observations"]):
+        raise ValueError("Database changed while loading the capture")
+    binding = dict(receipt_hashes=hashes, database_sha256=digest,
+                   validated_observations=validation["validated_observations"])
+    return dict(observations=observations, coverage=coverage, manifest=manifest,
+                validation=validation, source_manifest=sources, binding=binding)
+
+
 def _write_json(path, value):
     Path(path).write_text(json.dumps(value, indent=2, allow_nan=False) + "\n", encoding="utf-8")
 

@@ -10,7 +10,8 @@ import re
 
 import pandas as pd
 
-from variant_gaming.refresh import validate_snapshot
+from variant_gaming.refresh import frozen_database_sha256, load_validated_snapshot
+from variant_gaming.flut_scorecard import build_monthly_scorecard, build_quarterly_scorecard
 
 SCOPE = "flutter_us_segment"
 UNIT = "USD_millions"
@@ -68,37 +69,12 @@ def _source(root: Path, binding: dict) -> Path:
 
 
 def _database_hash(path: Path) -> str:
-    for suffix in ("-wal", "-journal"):
-        sidecar = Path(str(path) + suffix)
-        if sidecar.exists() and sidecar.stat().st_size:
-            raise ValueError("frozen database has an unbound WAL or journal; checkpoint it before review")
-    return _sha(path)
+    return frozen_database_sha256(path)
 
 
 def _capture_binding(root: Path, database: Path, capture: datetime) -> dict:
-    """Revalidate real rows/source bytes and bind their original completion receipts."""
-    digest = _database_hash(database)
-    documents, hashes = {}, {}
-    for name in ("run_manifest.json", "validation.json"):
-        raw = database.with_name(name).read_bytes()
-        documents[name] = json.loads(raw)
-        hashes[name] = hashlib.sha256(raw).hexdigest()
-        if documents[name].get("database_sha256") != digest:
-            raise ValueError("capture receipt does not bind the current database")
-    if _clock(documents["run_manifest.json"].get("finished_at")) != capture:
-        raise ValueError("supplied data capture time differs from run_manifest.finished_at")
-    validation, _ = validate_snapshot(root=root, database=database, as_of=capture)
-    if validation["database_sha256"] != digest:
-        raise ValueError("database changed while binding the capture")
-    # Validation checks actual SQLite schema, row clocks, monetary values and raw hashes.
-    for name, raw in documents.items():
-        count = raw.get("validated_observations", raw.get("observation_count"))
-        if count is not None and count != validation["validated_observations"]:
-            raise ValueError(f"capture receipt observation count differs: {name}")
-        if _sha(database.with_name(name)) != hashes[name]:
-            raise ValueError("capture receipt changed during validation")
-    return dict(receipt_hashes=hashes, database_sha256=digest,
-                validated_observations=validation["validated_observations"])
+    return load_validated_snapshot(root=root, database=database, as_of=capture,
+                                   data_capture_at=capture)["binding"]
 
 
 def load_company_reference(path: Path, *, project_root: Path) -> dict:
@@ -199,7 +175,21 @@ def build_expectations_review(quarterly: pd.DataFrame, reference: dict, *, as_of
         _source(root, row)
     if _sha(Path(reference["config_path"])) != reference["config_sha256"]:
         raise ValueError("company reference config changed after loading")
-    capture_binding = _capture_binding(root, Path(database_path), capture)
+    loaded = load_validated_snapshot(root=root, database=database_path, as_of=cutoff,
+                                     data_capture_at=capture)
+    if quarterly.through_month.nunique() != 1:
+        raise ValueError("state evidence must use one explicit through-month")
+    rebuilt = build_quarterly_scorecard(build_monthly_scorecard(loaded["observations"]),
+        quarter=target, through_month=quarterly.through_month.iloc[0])
+    keys = ["state_code", "vertical", "metric"]
+    try:
+        pd.testing.assert_frame_equal(
+            quarterly.sort_values(keys).reset_index(drop=True).sort_index(axis=1),
+            rebuilt.sort_values(keys).reset_index(drop=True).sort_index(axis=1),
+            check_dtype=False, check_exact=True)
+    except AssertionError as exc:
+        raise ValueError("state evidence differs from scorecard recomputed from the bound database") from exc
+    capture_binding = loaded["binding"]
     review = dict(schema_version=SCHEMA, period=target, scope=SCOPE,
                 information_cutoff=cutoff.isoformat(), data_capture_at=capture.isoformat(),
                 database_path=str(Path(database_path).resolve()), database_sha256=capture_binding["database_sha256"],

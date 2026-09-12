@@ -4,7 +4,7 @@ One notebook-first research repository with two independent projects:
 
 | Project | Start here | Purpose |
 | --- | --- | --- |
-| Gaming / FLUT | [Gaming guide](gaming/README.md) | Official state reports, FanDuel sportsbook and casino research |
+| Gambling industry | [Gaming guide](gaming/README.md) | Public gambling data, legal developments and FLUT/DKNG/CZR research |
 | Vehicle / Carvana | [Vehicle walkthrough](vehicle/docs/code_walkthrough.md) | Retained inventory, asking prices, listing-status evidence and quarterly assumptions |
 
 Each project has its own modules, notebooks, fixtures, and data. ResearchOSCore and
@@ -31,16 +31,16 @@ source references resolve within their own project, not relative to the Git root
 
 ## Current data availability
 
-The latest September 12 gaming capture contains **19,806 observations across 34
-state/product series**, including recovered Kentucky operator history. Start with
-[FLUT current data](gaming/notebooks/94_flut_current_data.ipynb), then the
-[quarterly scorecard](gaming/notebooks/95_flut_quarterly_scorecard.ipynb) and
-[expectations review](gaming/notebooks/96_flut_expectations_review.ipynb).
-The [current analyst review](gaming/docs/flut_current_quarter_review_20260912.md)
-explains the July results and next research priorities. The
-[workflow guide](gaming/docs/flut_workflow.md) records refresh, validation, backup,
-and the first frozen reference. Notebook 20 previews a fresh capture and performs
-validated collection and a tested backup when explicitly enabled.
+Gaming uses three steps: [20 — capture official reports](gaming/notebooks/20_run_all_collectors.ipynb),
+[94 — read the industry update](gaming/notebooks/94_gaming_industry_update.ipynb), and
+[90 — investigate sources](gaming/notebooks/90_consolidated_ggr.ipynb). The selected
+September 12 capture has **19,806 observations across 34 state/product series**;
+the comparable MA/MI monthly panel and separate NY weekly panel have narrower
+coverage. The [industry guide](gaming/docs/industry_workflow.md) explains the
+single snapshot setting, legal-event watchlist and optional dated note export.
+Read the [September 12 example](gaming/docs/industry_update_20260912.md) for the
+business conclusions and limitations. FLUT expectations notebooks 95/96 remain
+optional historical experiments.
 
 The exact historical original, staging, and approved-candidate databases remain
 missing. Studies 91–93 retain their original gates and historical outputs; fresh
@@ -59,8 +59,9 @@ runs collectors, refreshes data, changes approved snapshots, or promotes a valua
 
 Use `--project gaming` or `--project vehicle` to check one notebook workflow.
 The checker blocks network access and writes; missing data and approval blocks are
-not successful executions. Historical notebooks 40–45 are retained investigations,
-not part of the active offline notebook run.
+not successful executions. The daily gaming path and historical approval studies 91–93 are checked by default;
+91–93 remain BLOCKED on missing archives. Add `--include-reference` for optional
+source examples and FLUT experiments 95/96. Older 40–45 remain retained investigations.
 
 ## Keep development together
 

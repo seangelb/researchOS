@@ -56,7 +56,7 @@ def _share(numerator, denominator, *, handle=False):
     return 100 * numerator / denominator, "ok"
 
 
-def _month_values(group, contract, metric):
+def _month_values(group, contract, metric, *, common_source=True):
     """Reject unknown denominators, source splicing and conflicting revisions."""
     if not group.reported_revenue_name.isin(contract["labels"]).all():
         raise ValueError("unrecognized_native_metric_label")
@@ -72,7 +72,7 @@ def _month_values(group, contract, metric):
             raise ValueError("conflicting_source_versions")
         resolved.append(versions.iloc[0])
         cohorts.append(set(versions.source_sha256))
-    if not cohorts or not set.intersection(*cohorts):
+    if not cohorts or (common_source and not set.intersection(*cohorts)):
         raise ValueError("no_common_source_version")
     rows = pd.DataFrame(resolved)
     official = rows[rows.row_type.eq("official_statewide_total")]
@@ -83,15 +83,16 @@ def _month_values(group, contract, metric):
         raise ValueError("unexpected_or_missing_operator_rows")
     if not operators.report_status.eq(contract["operator_status"]).all():
         raise ValueError("unverified_operator_status")
-    fd = operators[operators.operator.eq(contract["operator"])]
+    identities = [contract["operator"]]
+    fd = official if contract["operator"] is None else operators[operators.operator.isin(identities)]
     if len(fd) != 1:
-        raise ValueError("missing_or_ambiguous_native_fanduel_identity")
+        raise ValueError(contract.get("identity_error", "missing_or_ambiguous_native_fanduel_identity"))
     values = pd.to_numeric(rows[metric], errors="coerce")
     if not values.map(lambda value: pd.notna(value) and math.isfinite(value)).all():
         raise ValueError("missing_or_nonfinite_metric")
     if metric == "handle" and (values < 0).any():
         raise ValueError("negative_handle")
-    fd_value = float(fd.iloc[0][metric])
+    fd_value = float(pd.to_numeric(fd[metric]).sum())
     market = float(official.iloc[0][metric])
     total = float(pd.to_numeric(operators[metric]).sum())
     if abs(total - market) > 0.010001:
@@ -99,7 +100,7 @@ def _month_values(group, contract, metric):
     return fd_value, market, total
 
 
-def build_monthly_scorecard(results: pd.DataFrame) -> pd.DataFrame:
+def build_monthly_scorecard(results: pd.DataFrame, *, operators=None) -> pd.DataFrame:
     """One row per supported state/product/month/native metric, including failures.
 
     Callers must validate retained source bytes separately. Reconciliation proves
@@ -108,6 +109,11 @@ def build_monthly_scorecard(results: pd.DataFrame) -> pd.DataFrame:
     """
     output = []
     for (state, vertical), contract in CONTRACTS.items():
+        if operators is not None:
+            if (state, vertical) not in operators:
+                continue
+            contract = dict(contract, operator=operators[state, vertical],
+                            identity_error="missing_or_ambiguous_native_operator_identity")
         selected = results[results.state_code.eq(state) & results.vertical.eq(vertical)
                            & results.channel.eq("online") & results.frequency.eq("monthly")]
         for (start, end), group in selected.groupby(["period_start", "period_end"], dropna=False):
@@ -239,4 +245,6 @@ def sportsbook_hold(quarterly: pd.DataFrame) -> pd.DataFrame:
                 item["hold_change_pp"] = item["fd_hold_pct"] - item["prior_fd_hold_pct"]
                 item["status"] = "ok" if h.fd_amount > 0 and h.prior_fd_amount > 0 else "nonpositive_handle"
         rows.append(item)
-    return pd.DataFrame(rows)
+    return pd.DataFrame(rows).reindex(columns=[
+        "state_code", "vertical", "status", "quarter", "through_month", "native_metric",
+        "matched_window_months", "fd_hold_pct", "prior_fd_hold_pct", "hold_change_pp"])

@@ -23,6 +23,8 @@ from urllib.parse import parse_qs, urlsplit
 from urllib.request import url2pathname
 
 APPROVAL_BLOCK = "FAIL CLOSED: analyst-approval binding mismatch:"
+GAMING_NOTEBOOKS = ("20", "90", "94", "91", "92", "93")
+GAMING_REFERENCES = ("00", "10", "11", "30", "31", "95", "96")
 
 
 @contextlib.contextmanager
@@ -113,11 +115,12 @@ def run_notebook(path: Path, root: Path) -> dict:
     return result
 
 
-def main() -> int:
+def main(argv=None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     parser.add_argument("--project", choices=("gaming", "vehicle", "all"), default="vehicle")
-    args = parser.parse_args()
+    parser.add_argument("--include-reference", action="store_true", help="Also execute optional gaming examples and FLUT experiments")
+    args = parser.parse_args(argv)
     projects = ["gaming", "vehicle"] if args.project == "all" else [args.project]
     jobs = []
     for name in projects:
@@ -126,7 +129,9 @@ def main() -> int:
         if not directory.is_dir():
             parser.error(f"Notebook directory does not exist: {directory}")
         if name == "gaming":
-            active = ("00", "10", "11", "20", "30", "31", "90", "91", "92", "93", "94", "95", "96")
+            # The daily path is 20 / 94 / 90. Historical approval studies remain
+            # checked, with missing original evidence honestly reported BLOCKED.
+            active = GAMING_NOTEBOOKS + (GAMING_REFERENCES if args.include_reference else ())
             notebooks = [p for p in sorted(directory.glob("*.ipynb")) if p.name[:2] in active]
             missing = [prefix for prefix in active if not any(p.name.startswith(prefix + "_") for p in notebooks)]
             if missing:

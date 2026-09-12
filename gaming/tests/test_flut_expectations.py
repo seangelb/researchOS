@@ -10,6 +10,7 @@ import pytest
 
 from variant_gaming import flut_expectations as expectations
 from variant_gaming.storage import RESULT_COLUMNS, SCHEMA_SQL, UPSERT_SQL
+from variant_gaming.flut_scorecard import MI_LABEL, build_monthly_scorecard, build_quarterly_scorecard
 
 
 @pytest.fixture
@@ -32,26 +33,30 @@ def setup(tmp_path, monkeypatch):
     config_path.write_text(json.dumps(config))
     reference = expectations.load_company_reference(config_path, project_root=tmp_path)
     database = tmp_path / "capture.sqlite"
-    row = dict.fromkeys(RESULT_COLUMNS)
-    row.update(binding, jurisdiction="Michigan", state_code="MI", vertical="online_sports_betting",
-               channel="online", operator="FanDuel", row_type="operator", period_start="2026-07-01",
-               period_end="2026-07-31", frequency="monthly", handle=120,
-               retrieved_at_utc="2026-09-11T11:00:00Z", report_status="ok")
+    rows = []
+    for year, fd, other in [(2026, 120, 180), (2025, 100, 150)]:
+        for operator, amount, row_type in [("FanDuel (MotorCity Casino)", fd, "operator"),
+                                          ("Other", other, "operator"),
+                                          ("STATEWIDE", fd + other, "official_statewide_total")]:
+            row = dict.fromkeys(RESULT_COLUMNS)
+            row.update(binding, jurisdiction="Michigan", state_code="MI", vertical="online_sports_betting",
+                       channel="online", operator=operator, row_type=row_type, period_start=f"{year}-07-01",
+                       period_end=f"{year}-07-31", frequency="monthly", handle=amount,
+                       gross_revenue=amount/10, adjusted_revenue=amount/20, reported_revenue_name=MI_LABEL,
+                       retrieved_at_utc="2026-09-11T11:00:00Z", report_status="ok")
+            rows.append(row)
     with closing(sqlite3.connect(database)) as connection:
         connection.executescript(SCHEMA_SQL)
-        connection.execute(UPSERT_SQL, row)
+        connection.executemany(UPSERT_SQL, rows)
         connection.commit()
     def receipts():
         digest = hashlib.sha256(database.read_bytes()).hexdigest()
         (tmp_path / "run_manifest.json").write_text(json.dumps(dict(database_sha256=digest,
-                    finished_at="2026-09-11T12:00:00Z", observation_count=1)))
-        (tmp_path / "validation.json").write_text(json.dumps(dict(database_sha256=digest, validated_observations=1)))
+                    finished_at="2026-09-11T12:00:00Z", observation_count=len(rows))))
+        (tmp_path / "validation.json").write_text(json.dumps(dict(database_sha256=digest, validated_observations=len(rows))))
     receipts()
-    quarterly = pd.DataFrame([dict(state_code="MI", vertical="online_sports_betting", metric="handle",
-        native_metric="Handle", quarter="2026Q3", through_month="2026-07", expected_window_months=1,
-        observed_window_months=1, matched_window_months=1, quarter_complete=False, status="comparable",
-        source_refs=((binding["source_url"], binding["source_file"], binding["source_sha256"]),),
-        fd_amount=120, prior_fd_amount=100, fd_growth_pct=20)])
+    quarterly = build_quarterly_scorecard(build_monthly_scorecard(pd.DataFrame(rows)),
+                                          quarter="2026Q3", through_month="2026-07")
     def review():
         return expectations.build_expectations_review(quarterly, reference, as_of="2026-09-12T12:00:00Z",
                     data_capture_at="2026-09-11T12:00:00Z", database_path=database)
@@ -96,7 +101,7 @@ def test_nonfinite_or_boolean_financial_input_rejected(value):
 
 def test_native_evidence_and_reference_keep_scope_and_units(setup):
     review = setup["review"]()
-    assert review["state_evidence"][0]["fd_amount"] == 120
+    assert next(row for row in review["state_evidence"] if row["state_code"] == "MI" and row["metric"] == "handle")["fd_amount"] == 120
     assert review["state_evidence_unit"] == "USD"
     assert review["management_reference"]["unit"] == "USD_millions"
     assert review["management_reference"]["value_mid"] == "1480"
@@ -275,3 +280,19 @@ def test_snapshot_tampering_is_detected(setup):
     path.write_bytes(path.read_bytes().replace(b'"1480"', b'"1490"'))
     with pytest.raises(ValueError, match="integrity check"):
         expectations.evaluate_expectation(path, as_of="2026-09-12T12:00:00Z")
+
+
+@pytest.mark.parametrize("field,value", [("fd_amount", 12000), ("fd_growth_pct", 999),
+                                         ("matched_window_months", 0), ("status", "excluded")])
+def test_edited_quarterly_figures_cannot_inherit_database_verification(setup, field, value):
+    quarterly = setup["quarterly"]
+    index = quarterly.index[quarterly.state_code.eq("MI") & quarterly.metric.eq("handle")][0]
+    quarterly.loc[index, field] = value
+    with pytest.raises(ValueError, match="recomputed from the bound database"):
+        setup["review"]()
+
+
+def test_subset_or_extra_claim_cannot_inherit_database_verification(setup):
+    setup["quarterly"]["unbound_company_forecast"] = 9999
+    with pytest.raises(ValueError, match="recomputed from the bound database"):
+        setup["review"]()

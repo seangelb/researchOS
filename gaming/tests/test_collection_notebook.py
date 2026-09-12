@@ -22,6 +22,17 @@ def settings():
     return scope
 
 
+def test_default_base_follows_explicit_current_snapshot_selection(tmp_path, monkeypatch):
+    config = tmp_path / "config"
+    config.mkdir()
+    (config / "current_snapshot.json").write_text(json.dumps({"database_file": "data/staging/new_checked_capture/capture.sqlite"}))
+    monkeypatch.setattr("variant_gaming.common.project_root", lambda: tmp_path)
+    scope = {}
+    execute_cell(scope, 1)
+    assert scope["base_database_file"] == "data/staging/new_checked_capture/capture.sqlite"
+    assert scope["run_downloads"] is scope["allow_database_writes"] is False
+
+
 @pytest.mark.parametrize("downloads,writes", [(False, False), (True, False), (False, True)])
 def test_collection_requires_both_switches(downloads, writes):
     scope = settings()

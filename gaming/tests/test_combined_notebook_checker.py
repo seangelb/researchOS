@@ -54,13 +54,28 @@ def test_existing_sqlite_stays_readonly(tmp_path):
 
 
 def test_all_projects_reports_missing_data_and_exits_nonzero(tmp_path, monkeypatch, capsys):
-    for prefix in ("00", "10", "11", "20", "30", "31", "90", "91", "92", "93", "94", "95", "96"):
+    for prefix in checker.GAMING_NOTEBOOKS:
         write_notebook(tmp_path / f"gaming/notebooks/{prefix}_test.ipynb", "assert 1 + 1 == 2")
     write_notebook(tmp_path / "vehicle/notebooks/test.ipynb", "from pathlib import Path; Path('data/missing.csv').read_bytes()")
     monkeypatch.setattr("sys.argv", [str(REPOSITORY / "scripts/check_notebooks.py"), "--root", str(tmp_path), "--project", "all"])
     assert checker.main() == 1
     results = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    assert len(results) == 14
-    assert sum(r["status"] == "PASS" and r["project"] == "gaming" for r in results) == 13
+    assert len(results) == 7
+    assert sum(r["status"] == "PASS" and r["project"] == "gaming" for r in results) == 6
     assert results[-1]["project"] == "vehicle"
     assert results[-1]["status"] == "BLOCKED"
+
+
+def test_daily_path_keeps_historical_blocks_and_reference_experiments_are_optional(tmp_path, capsys):
+    assert {"20", "90", "94", "91", "92", "93"} == set(checker.GAMING_NOTEBOOKS)
+    assert {"95", "96"}.issubset(checker.GAMING_REFERENCES)
+    for prefix in checker.GAMING_NOTEBOOKS + checker.GAMING_REFERENCES:
+        source = "assert 1 + 1 == 2"
+        if prefix in {"91", "92", "93"}:
+            source = "from pathlib import Path; Path('data/missing_historical.sqlite').read_bytes()"
+        write_notebook(tmp_path / f"gaming/notebooks/{prefix}_test.ipynb", source)
+    assert checker.main(["--root", str(tmp_path), "--project", "gaming", "--include-reference"]) == 1
+    results = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    assert len(results) == 13
+    assert [result["notebook"][:2] for result in results if result["status"] == "BLOCKED"] == ["91", "92", "93"]
+    assert all(result["status"] == "PASS" for result in results if result["notebook"][:2] in {"20", "90", "94", "95", "96"})

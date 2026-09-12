@@ -1,0 +1,90 @@
+{
+  "description": "Bounded primary-source starting register. Facts, historical status, interpretation and recheck needs are separate; no claim of exhaustive current legal coverage.",
+  "prepared_at": "2026-09-12T22:08:45.182595+00:00",
+  "events": [
+    {
+      "event_id": "nj_2025_online_tax_change",
+      "jurisdiction": "NJ",
+      "topic": "gaming_tax",
+      "status": "enacted",
+      "event_date": "2025-06-30",
+      "effective_date": "2025-07-01",
+      "published_on": "2025-06-30",
+      "status_as_of": "2025-06-30",
+      "recheck_on": "2026-09-12",
+      "tickers": [
+        "FLUT",
+        "DKNG",
+        "CZR"
+      ],
+      "applicable_scope": "New Jersey internet casino and online sportsbook operations; company exposure is not quantified.",
+      "observed_fact": "P.L. 2025, c.66 establishes a 19.75% base tax on internet casino gaming revenue and online sports wagering revenue, effective July 1, 2025.",
+      "accounting_effect": "Base rate 19.75%; the Act also retains separate investment-alternative and additional sports-wagering provisions. This is not an all-in effective tax rate.",
+      "business_interpretation": "Analyst inference: higher gaming taxes can pressure operator economics even when market revenue grows. July 2025 effectiveness makes this existing context for July 2026 versus July 2025, not a newly dated September 2026 deterioration.",
+      "limitations": "Enacted text retained, not a complete audit of subsequent amendments or current company tax accounting. No company EBITDA or valuation change is calculated.",
+      "next_check": "Review current NJ tax guidance and issuer disclosures before quantifying a company effect.",
+      "source_id": "nj_2025_c66",
+      "source_locator": "Sections 1 and 2; effective date in section 4; approval date at end.",
+      "source_url": "https://pub.njleg.state.nj.us/Bills/2024/PL25/66_.HTM",
+      "source_file": "data/raw/GAMING_LEGAL/2026-09-12/nj_2025_c66_3c718a95c527e459.html",
+      "source_sha256": "3c718a95c527e459f4f34613c1e1cc1552f37ddb60700bfa27998f270a9b2481",
+      "captured_at": "2026-09-12T22:07:07.730727+00:00"
+    },
+    {
+      "event_id": "il_2025_per_wager_tax",
+      "jurisdiction": "IL",
+      "topic": "gaming_tax",
+      "status": "in_force",
+      "event_date": "2025-07-01",
+      "effective_date": "2025-07-01",
+      "published_on": null,
+      "status_as_of": "2025-12-31",
+      "recheck_on": "2026-09-12",
+      "tickers": [
+        "FLUT",
+        "DKNG",
+        "CZR"
+      ],
+      "applicable_scope": "Illinois master licensees taking online/mobile sports wagers; company-specific wager counts and incidence are not established.",
+      "observed_fact": "The Illinois Gaming Board 2025 Annual Report describes P.A. 104-0006 adding a per-wager tax from July 1, 2025: $0.25 on the first 20 million wagers per licensee and $0.50 above that threshold. The report records collections during July-December 2025.",
+      "accounting_effect": "Per-wager dollar charge, not a percentage of handle or gross revenue. Aggregate handle cannot determine its company cost.",
+      "business_interpretation": "Analyst inference: cost per transaction and any operator response may change the economics of smaller wagers. Treat this as existing statutory context; do not attribute current volume changes to the tax without further evidence.",
+      "limitations": "The retained annual report establishes the reported 2025 rule and collections, not a full September 2026 amendment or company pass-through review. Exact report publication date is unknown.",
+      "next_check": "Recheck current Illinois statute/regulator guidance and operator disclosures, then obtain wager counts if estimating cost.",
+      "source_id": "il_2025_igb_annual_report",
+      "source_locator": "Physical/printed page 15, Legislation 2025, Sports Wagering, Per Wager Tax.",
+      "source_url": "https://www.ilga.gov/Documents/Reports/ReportsSubmitted/7043RSGAEmail15806RSGAAttach2025%20IGB%20Annual%20Report.pdf",
+      "source_file": "data/raw/GAMING_LEGAL/2026-09-12/il_2025_igb_annual_report_0aaebb78dd76347e.pdf",
+      "source_sha256": "0aaebb78dd76347e785e4a9efb4eb6f95952c4db586e545b572cfb02f3ba4c62",
+      "captured_at": "2026-09-12T22:07:08.010506+00:00"
+    },
+    {
+      "event_id": "nv_kalshi_ca9_20260828",
+      "jurisdiction": "NV / Ninth Circuit",
+      "topic": "prediction_market_litigation",
+      "status": "interim_ruling",
+      "event_date": "2026-08-28",
+      "effective_date": null,
+      "published_on": "2026-08-28",
+      "status_as_of": "2026-08-28",
+      "recheck_on": "2026-09-12",
+      "tickers": [
+        "FLUT",
+        "DKNG",
+        "CZR"
+      ],
+      "applicable_scope": "Kalshi sports-event-contract litigation against Nevada officials; named tickers are research exposures, not parties or automatic beneficiaries.",
+      "observed_fact": "In KalshiEX v. Assad, No. 25-7516, the Ninth Circuit affirmed dissolution of preliminary protection against Nevada enforcement on sports-event contracts and remanded the election-contract issue. Kalshi had not established likely success on its preemption theory at this stage.",
+      "accounting_effect": "Not quantified; no observed company revenue, margin or cost change follows mechanically from the disposition.",
+      "business_interpretation": "Analyst inference: the ruling is relevant to competition between licensed sportsbooks and prediction products. Effects may differ for incumbent sportsbook operations and those companies own prediction-market initiatives.",
+      "limitations": "Published disposition of a preliminary-injunction appeal, not a nationwide final ban or a measured fundamentals improvement. Subsequent rehearing, stay, mandate and other-circuit status are not established by this PDF.",
+      "next_check": "Check subsequent court orders and relevant dockets before treating the August 28 posture as current; retain competing legal outcomes separately.",
+      "source_id": "nv_kalshi_ca9_20260828",
+      "source_locator": "Opinion physical page 47, section IV disposition; filing date on physical page 2.",
+      "source_url": "https://cdn.ca9.uscourts.gov/datastore/opinions/2026/08/28/25-7516.pdf",
+      "source_file": "data/raw/GAMING_LEGAL/2026-09-12/nv_kalshi_ca9_20260828_06189ad9ff98da18.pdf",
+      "source_sha256": "06189ad9ff98da18080165d637a2a2caea146518cf2b477aff5840fe506e2fb5",
+      "captured_at": "2026-09-12T22:07:07.768487+00:00"
+    }
+  ]
+}
