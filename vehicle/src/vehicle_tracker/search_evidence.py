@@ -46,6 +46,8 @@ def public_source(value, fields=SOURCE_FIELDS, *, key='', changes=None):
 
     Missing keys, nulls, booleans, numbers and wrong container types survive. Unknown
     keys and unsafe strings do not. A redacted value is never admitted as inventory.
+    Projection and parsing validate inventory shape later; this step only decides
+    which source information can be retained safely, including malformed shapes.
     """
     changes = changes if changes is not None else []
     if key == 'priceUpdateDate' and value is not None:
@@ -76,7 +78,12 @@ def public_source(value, fields=SOURCE_FIELDS, *, key='', changes=None):
         patterns = {'vin': r'[A-HJ-NPR-Z0-9]{17}', 'zip5': r'\d{5}',
                     'vehicleId': r'\d{1,12}'}
         text_fields = {'make', 'model', 'parentModel', 'vehiclePurchaseType'}
-        pattern = patterns.get(key, r"[A-Za-z0-9 .()/'&+\-]{1,100}" if key in text_fields else r'-?\d+(\.\d+)?')
+        if key in patterns:
+            pattern = patterns[key]
+        elif key in text_fields:
+            pattern = r"[A-Za-z0-9 .()/'&+\-]{1,100}"
+        else:
+            pattern = r'-?\d+(\.\d+)?'
         if fields is None and re.fullmatch(pattern, value):
             return value
         changes.append('redacted_value')
@@ -90,9 +97,11 @@ def public_source(value, fields=SOURCE_FIELDS, *, key='', changes=None):
 def retain_response_evidence(response, directory):
     """Retain replayable safe JSON even when project_response would raise.
 
-    Full content is retained only when it equals the complete public allowlist.
+    Original response bytes are retained only when every decoded field/value is
+    allowed and duplicate JSON keys are absent. Their hash matches response_content_sha256.
     Other JSON becomes a selected source. HTML/invalid JSON is not retained because
     this contract cannot establish that its text is public vehicle information.
+    source_sha256 hashes the retained file; a later projection has its own hash.
     """
     content = response.content
     evidence = dict(contract=CONTRACT, kind='not_retained',
@@ -164,7 +173,11 @@ def verify_response_evidence(evidence):
 
 
 def replay_response(evidence, request, *, observed_at):
-    """Replay the source projection and parser without requests or writes."""
+    """Verify retained source bytes, then rebuild the projection and parsed rows.
+
+    Replay uses the supplied observation clock; reading a source does not make it
+    a new observation. This function makes no requests or writes.
+    """
     from vehicle_tracker.search import project_response, parse_search_capture
     source = verify_response_evidence(evidence)
     if evidence['kind'] == 'not_retained':

@@ -8,24 +8,10 @@ Normal **Restart Kernel and Run All is offline and read-only**. Notebook 11's
 live function is defined but never invoked by default. Collection is a separate
 deliberate action; the proposed operating dates are not a scheduler.
 
-## Follow the data
-
-The data flow is:
-
-1. **Settings → request:** `search.py` builds the existing public search payload
-   from make/model/year/ZIP, page and location-filter settings.
-2. **Request → retained source:** the existing collector controls pacing, attempt
-   limits and stops. It retains selected public JSON, normalized projections,
-   request/page records and per-query SQLite observations in the chosen destination.
-3. **Source → pandas:** `search_evidence.py` checks retained response contracts and
-   hashes; `history.py`'s `read_query_evidence` reconciles identities, pagination and
-   clocks before existing readers reopen the normalized observations.
-4. **Daily history → research:** explicit daily import registers a fixed population
-   in its own SQLite history. Notebook 20 joins compatible dates; 24 reviews a
-   separately frozen sample; 30 keeps analyst assumptions and forecast vintages apart.
-
-A retained projection is not necessarily a complete original HTTP response.
-Reloading source does not make a new observation or update its timestamp.
+For the research question, populations, row keys, table contracts and function
+flow, start with the [code walkthrough](code_walkthrough.md). This document is
+the operating reference for exact settings, commands, authorization, recovery
+and the retained historical evidence below.
 
 ## Settings, real examples and exercises
 

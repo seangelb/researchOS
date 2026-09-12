@@ -126,7 +126,7 @@ def recovery_candidates(settings, *, now=None):
     """Read-only discovery of unregistered cycles; this never resumes a request."""
     now = now or utcnow()
     entries = registered_cycles(settings)
-    selected = {entry['path'] for entry in entries}
+    registered_paths = {entry['path'] for entry in entries}
     registered_dates = {entry['cycle_date'] for entry in entries}
     candidates = []
     for folder in sorted(settings['capture_root'].glob('*')):
@@ -135,7 +135,7 @@ def recovery_candidates(settings, *, now=None):
         path = folder / 'cycle.json'
         if not path.is_file() and not re.fullmatch(r'\d{4}-\d{2}-\d{2}', folder.name):
             continue
-        if str(path.resolve()) in selected:
+        if str(path.resolve()) in registered_paths:
             continue
         row = dict(path=str(path.resolve()), import_allowed=False, live_resume_allowed=False)
         try:
@@ -144,35 +144,51 @@ def recovery_candidates(settings, *, now=None):
             if diagnostic['validation_errors'] or not diagnostic['requests_reconciled']:
                 raise ValueError('; '.join(diagnostic['validation_errors']) or
                                  'Durable request budget differs from child/page evidence; outcome uncertain')
-            state, coverage, reports = cycle_evidence(path)
-            retained_stop = None
+            cycle_state, coverage, reports = cycle_evidence(path)
+            retained_stop_reason = None
             for report in reports:
                 try:
                     require_safe_resume(json.loads(report.read_text(encoding='utf-8')))
                 except ValueError as error:
-                    retained_stop = str(error)
+                    retained_stop_reason = str(error)
                     break
-            matches = state['queries'] == settings['queries'] and state['timezone'] == settings['timezone']
-            date_selected = state['cycle_date'] in registered_dates
-            row.update(cycle_date=state['cycle_date'], coverage_complete=state['coverage_complete'],
-                       requests=state['budget']['requests'], import_allowed=matches and not date_selected)
-            elapsed = (now - _aware(state['created_at'])).total_seconds()
-            reason = ('Settings population or timezone differs' if not matches else
-                'Date already registered with different evidence; review only' if date_selected else
-                'Complete retained cycle; no requests needed' if state['coverage_complete'] else
-                'Retained request outcome uncertain; live resume blocked' if diagnostic['request_outcome_uncertain'] else
-                'Previous request outcome uncertain; live resume blocked' if state['budget']['pending_request'] else
-                'Access or transport stop; live resume blocked' if state['budget']['stopped'] else
-                retained_stop if retained_stop else
-                'Settings limits differ; live resume blocked' if any(state[key] != settings[key] for key in ['max_requests', 'max_seconds']) else
-                'Completed query is outside the frozen window; live resume blocked' if (
-                    coverage.query_complete.eq(1) & ~coverage.within_window).any() else
-                'Observation window expired or clock changed; live resume blocked' if not (
-                    0 <= elapsed < state['max_seconds'] and _aware(state['window_start']) <= now < _aware(state['window_end'])) else
-                'Current clock precedes the last request; live resume blocked' if (
-                    state['budget']['last_request_utc'] and now < _aware(state['budget']['last_request_utc'])) else
-                'Request budget exhausted; live resume blocked' if state['budget']['requests'] >= state['max_requests'] else
-                None)
+            matches_population = (cycle_state['queries'] == settings['queries']
+                                  and cycle_state['timezone'] == settings['timezone'])
+            date_already_registered = cycle_state['cycle_date'] in registered_dates
+            row.update(cycle_date=cycle_state['cycle_date'], coverage_complete=cycle_state['coverage_complete'],
+                       requests=cycle_state['budget']['requests'],
+                       import_allowed=matches_population and not date_already_registered)
+            elapsed = (now - _aware(cycle_state['created_at'])).total_seconds()
+            # The first applicable reason wins; offline import and another request
+            # have separate eligibility. Completed evidence needs no new request.
+            if not matches_population:
+                reason = 'Settings population or timezone differs'
+            elif date_already_registered:
+                reason = 'Date already registered with different evidence; review only'
+            elif cycle_state['coverage_complete']:
+                reason = 'Complete retained cycle; no requests needed'
+            elif diagnostic['request_outcome_uncertain']:
+                reason = 'Retained request outcome uncertain; live resume blocked'
+            elif cycle_state['budget']['pending_request']:
+                reason = 'Previous request outcome uncertain; live resume blocked'
+            elif cycle_state['budget']['stopped']:
+                reason = 'Access or transport stop; live resume blocked'
+            elif retained_stop_reason:
+                reason = retained_stop_reason
+            elif any(cycle_state[key] != settings[key] for key in ['max_requests', 'max_seconds']):
+                reason = 'Settings limits differ; live resume blocked'
+            elif (coverage.query_complete.eq(1) & ~coverage.within_window).any():
+                reason = 'Completed query is outside the frozen window; live resume blocked'
+            elif not (0 <= elapsed < cycle_state['max_seconds']
+                      and _aware(cycle_state['window_start']) <= now < _aware(cycle_state['window_end'])):
+                reason = 'Observation window expired or clock changed; live resume blocked'
+            elif (cycle_state['budget']['last_request_utc']
+                  and now < _aware(cycle_state['budget']['last_request_utc'])):
+                reason = 'Current clock precedes the last request; live resume blocked'
+            elif cycle_state['budget']['requests'] >= cycle_state['max_requests']:
+                reason = 'Request budget exhausted; live resume blocked'
+            else:
+                reason = None
             row['live_resume_allowed'] = reason is None
             row['reason'] = reason or 'Incomplete retained cycle; explicit identical-window resume may be possible'
             row['offline_action'] = f'--import-cycle "{path.resolve()}"' if row['import_allowed'] else 'Review the retained cycle with its original settings'
@@ -225,26 +241,39 @@ def daily_tables(days, rows, *, as_of, timezone_name, followup_limit=20, checks=
                                on='cycle_id', validate='many_to_one')
     inventory_rows['duplicate_vin_in_cycle'] = rows.duplicated(['cycle_id', 'retailer', 'vin'], keep=False).to_numpy()
     inventory_rows['duplicate_listing_in_cycle'] = rows.duplicated(['cycle_id', 'retailer', 'listing_id'], keep=False).to_numpy()
-    metrics, previous, previous_date, previous_complete = [], set(), None, False
+    metrics = []
+    previous_identities, previous_date, previous_inventory_complete = set(), None, False
     for day in summary.to_dict('records'):
-        frame = rows[rows.cycle_id.eq(day['cycle_id'])]
-        identities = set(zip(frame.retailer, frame.vin))
-        complete = pd.notna(day['coverage_complete']) and bool(day['coverage_complete']) and not analysis_error
-        known = pd.notna(day['cycle_id'])
+        day_observations = rows[rows.cycle_id.eq(day['cycle_id'])]
+        observed_identities = set(zip(day_observations.retailer, day_observations.vin))
+        inventory_complete = (pd.notna(day['coverage_complete'])
+                              and bool(day['coverage_complete']) and not analysis_error)
+        has_recorded_cycle = pd.notna(day['cycle_id'])
         date = pd.Timestamp(day['cycle_date'])
-        comparable = complete and previous_complete and date - previous_date == pd.Timedelta(days=1)
-        metrics.append(dict(coverage_status='invalid' if analysis_error and known else 'complete' if complete else 'partial' if known else 'missing',
+        daily_change_available = (inventory_complete and previous_inventory_complete
+                                  and date - previous_date == pd.Timedelta(days=1))
+        if analysis_error and has_recorded_cycle:
+            coverage_status = 'invalid'
+        elif inventory_complete:
+            coverage_status = 'complete'
+        elif has_recorded_cycle:
+            coverage_status = 'partial'
+        else:
+            coverage_status = 'missing'
+        # Partial cycles describe only observed rows. Inventory changes require
+        # complete coverage on both consecutive dates; absence is not a sale.
+        metrics.append(dict(coverage_status=coverage_status,
             analysis_error=analysis_error,
-            observed_vins=len(identities) if known else pd.NA,
-            inventory_count=len(identities) if complete else pd.NA,
-            pending_true=int(frame.purchase_pending.eq(True).sum()) if known else pd.NA,
-            pending_unknown=int(frame.purchase_pending.isna().sum()) if known else pd.NA,
-            average_asking_price_usd=frame.asking_price_usd.mean(),
-            missing_prices=int(frame.asking_price_usd.isna().sum()) if known else pd.NA,
-            new_since_previous_day=len(identities-previous) if comparable else pd.NA,
-            absent_since_previous_day=len(previous-identities) if comparable else pd.NA,
+            observed_vins=len(observed_identities) if has_recorded_cycle else pd.NA,
+            inventory_count=len(observed_identities) if inventory_complete else pd.NA,
+            pending_true=int(day_observations.purchase_pending.eq(True).sum()) if has_recorded_cycle else pd.NA,
+            pending_unknown=int(day_observations.purchase_pending.isna().sum()) if has_recorded_cycle else pd.NA,
+            average_asking_price_usd=day_observations.asking_price_usd.mean(),
+            missing_prices=int(day_observations.asking_price_usd.isna().sum()) if has_recorded_cycle else pd.NA,
+            new_since_previous_day=len(observed_identities - previous_identities) if daily_change_available else pd.NA,
+            absent_since_previous_day=len(previous_identities - observed_identities) if daily_change_available else pd.NA,
             site_marked_sold=pd.NA, estimated_sales=pd.NA))
-        previous, previous_date, previous_complete = identities, date, complete
+        previous_identities, previous_date, previous_inventory_complete = observed_identities, date, inventory_complete
     summary = pd.concat([summary, pd.DataFrame(metrics)], axis=1)
     summary['as_of'] = cutoff.isoformat()
     if analysis_error:

@@ -1,7 +1,9 @@
 """An inventory-defined, prospective website-status experiment.
 
-Four sampling groups, two fixed observation windows, and three small exact tests.
-Native Sold is the endpoint; transactions and nationwide sales are not measured.
+Four observational comparison groups (arms), two fixed check windows, and three
+small exact tests. An arm is also a sampling stratum; no treatment is assigned.
+The first matched native check supplies the outcome: Sold/Available resolves it;
+other labels remain unresolved. Transactions and nationwide sales are not measured.
 """
 from math import comb, sqrt
 import hashlib
@@ -70,7 +72,9 @@ def inventory_frame(cycles, observations, *, as_of):
 def sample_frame(frame, *, per_arm=3, seed='carvana-status-v1'):
     """Seeded sampling within four inventory arms; order-independent hash ranking.
 
-    k/N belongs to its arm only. Unequal arm populations are not silently pooled
+    The frame lists candidate VINs; the sample selects some within each arm.
+    stratum_population is that arm's eligible count, and selection_probability
+    is selected_count / eligible_count. Unequal arms are not silently pooled
     into an estimate for the inventory universe. At most 100 study VINs; the
     existing collector splits each wave into batches of at most 12 visits.
     """
@@ -84,14 +88,15 @@ def sample_frame(frame, *, per_arm=3, seed='carvana-status-v1'):
     result['stratum_population'] = 0
     for arm in ARMS:
         eligible = result.loc[result.arm.eq(arm) & result.exclusion_reason.eq('')]
-        count, size = min(per_arm, len(eligible)), len(eligible)
-        if not size:
+        eligible_count = len(eligible)
+        selected_count = min(per_arm, eligible_count)
+        if not eligible_count:
             continue
         ranks = eligible.apply(lambda r: hashlib.sha256(
             f'{seed}|{arm}|{r.retailer}|{r.vin}'.encode()).hexdigest(), axis=1)
-        result.loc[eligible.index, 'stratum_population'] = size
-        result.loc[eligible.index, 'selection_probability'] = count / size
-        result.loc[ranks.sort_values().head(count).index, 'selected_for_check'] = True
+        result.loc[eligible.index, 'stratum_population'] = eligible_count
+        result.loc[eligible.index, 'selection_probability'] = selected_count / eligible_count
+        result.loc[ranks.sort_values().head(selected_count).index, 'selected_for_check'] = True
     return result
 
 
@@ -120,8 +125,9 @@ def study_feasibility(plan, records, *, browser_root, now, minutes_per_check=1.5
                       operator_minutes_per_day=20):
     """Read-only remaining workload for both fixed waves; never resize a plan.
 
-    First matched checks, including Unavailable, finish ascertainment. Failures
-    and absent checks still require capacity. A feasible result is conditional
+    A matched check finishes the planned observation, even if native Unavailable
+    leaves the binary Sold/Available outcome unresolved. Failed or absent checks
+    still need capacity. A feasible result is conditional
     on the stated operator effort and no new competing work, not guaranteed
     collection success or reserved future starts.
     """
@@ -211,6 +217,8 @@ def score_plan(plan, records, cycles, observations, *, as_of, browser_health=Non
     Later corrections replay through native_visits at the requested cutoff.
     Reappearance and elapsed observation intervals are descriptive, not returns
     or delivery times. A changed listing cannot supply this listing's outcome.
+    The output label 'pending' means the check window is still open; it does not
+    mean the inventory's purchase-pending flag was true.
     """
     cutoff = _aware(as_of)
     if _aware(plan['prepared_at']) > cutoff:
@@ -237,6 +245,20 @@ def score_plan(plan, records, cycles, observations, *, as_of, browser_health=Non
             valid = matched.loc[matched.checked_at.ge(start) & matched.checked_at.lt(end)] if not matched.empty else matched
             first = None if valid.empty else valid.iloc[0]
             resolved = first is not None and first.saleStatus in ['Available', 'Sold']
+            # Preserve the first matched check, including an unresolved native label.
+            # Without one, explain missingness in this fixed priority order.
+            if first is not None:
+                outcome = 'matched' if resolved else 'unresolved status'
+            elif len(reservations):
+                outcome = 'started unresolved'
+            elif len(late):
+                outcome = 'late completion'
+            elif cutoff < end:
+                outcome = 'pending'
+            elif len(attempts):
+                outcome = 'failed'
+            else:
+                outcome = 'missing'
             row.update({wave+'_status': first.saleStatus if resolved else None,
                 wave+'_native_status': None if first is None else first.saleStatus,
                 wave+'_checked_at': None if first is None else first.checked_at,
@@ -247,10 +269,7 @@ def score_plan(plan, records, cycles, observations, *, as_of, browser_health=Non
                 wave+'_unresolved_visits': len(reservations),
                 wave+'_late_completions': len(late),
                 wave+'_late_matched_captures': int(late.parse_outcome.eq('matched').sum()) if not late.empty else 0,
-                wave+'_outcome': ('matched' if resolved else 'unresolved status') if first is not None else
-                    'started unresolved' if len(reservations) else
-                    'late completion' if len(late) else
-                    'pending' if cutoff < end else 'failed' if len(attempts) else 'missing'})
+                wave+'_outcome': outcome})
         after = matched.loc[matched.checked_at.ge(_aware(plan['prepared_at']))] if not matched.empty else matched
         sold = after.loc[after.saleStatus.eq('Sold')] if not after.empty else after
         first_sold = None if sold.empty else sold.iloc[0]
@@ -294,8 +313,11 @@ def arm_outcomes(outcomes, plan, *, as_of, wave='primary'):
     for arm in ARMS:
         group = outcomes.loc[outcomes.arm.eq(arm)]
         selected = len(group)
-        sold, available = [int(group[wave+'_status'].eq(status).sum()) for status in ['Sold', 'Available']]
-        resolved, unresolved = sold+available, selected-sold-available
+        # Each row is one selected VIN, regardless of how often it was checked.
+        sold = int(group[wave+'_status'].eq('Sold').sum())
+        available = int(group[wave+'_status'].eq('Available').sum())
+        resolved = sold + available
+        unresolved = selected - resolved
         fraction = sold/resolved if resolved else None
         low, high = None, None
         if resolved:

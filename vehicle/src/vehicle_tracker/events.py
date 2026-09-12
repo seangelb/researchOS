@@ -1,4 +1,9 @@
-"""Read-only daily VIN diagnostics. Missing listings and native pending are not sales."""
+"""Turn dated inventory rows into a daily panel of website observations.
+
+vin_events follows each (retailer, VIN) through the supplied collection dates;
+daily_counts aggregates that panel. Missing listings and pending flags are not
+sales, and neither function estimates transactions or writes evidence.
+"""
 import pandas as pd
 
 RULE_VERSION = 'vin-daily-v2'
@@ -51,7 +56,8 @@ def vin_events(cycles, observations, *, absence_days=3):
 
     Observation fields on absent rows retain the last presence evidence; check
     observed_in_cycle and last_observed_cycle_id before treating them as current.
-    First observations are left-censored. A persistent-absence event occurs once
+    First observations are left-censored: arrival before our first sighting is unknown.
+    A persistent-absence event occurs once
     per absence episode when a consecutive complete-day threshold is reached.
     Gaps/partial days reset the streak, and timing uncertainty survives until return.
     Availability is the latest supporting cycle availability, never a backdated sale.
@@ -77,18 +83,20 @@ def vin_events(cycles, observations, *, absence_days=3):
         raise ValueError('Observation timestamp falls outside its daily cycle window')
     columns = list(dict.fromkeys([*observations.columns, *SOURCE_FIELDS, *NATIVE_FIELDS, *CYCLE_COLUMNS,
         *('previous_'+field for field in [*SOURCE_FIELDS, *NATIVE_FIELDS]), *EVENT_FIELDS]))
-    rows, known, previous, availability = [], {}, None, None
+    # Each vehicle keeps its last presence, first sighting and absence state.
+    # This private memory is separate from the emitted row for the current date.
+    rows, vehicle_states, previous_cycle, availability = [], {}, None, None
     missing = float('nan')
     for cycle in schedule.to_dict('records'):
         availability = max(availability, cycle['_available_at']) if availability is not None else cycle['_available_at']
         present = {(row['retailer'], row['vin']): row for row in observations.loc[
             observations.cycle_id.eq(cycle['cycle_id'])].to_dict('records')}
-        gap = previous is not None and (cycle['_date'] - previous['_date']).days != 1
-        for key in sorted(set(known) | set(present)):
-            state, current = known.get(key), present.get(key)
+        gap = previous_cycle is not None and (cycle['_date'] - previous_cycle['_date']).days != 1
+        for key in sorted(set(vehicle_states) | set(present)):
+            state, current = vehicle_states.get(key), present.get(key)
             before = state['last'] if state else {}
-            uncertain = bool(state and (state['uncertain'] or gap or (previous and
-                not previous['coverage_complete'] and before['cycle_id'] != previous['cycle_id'])))
+            uncertain = bool(state and (state['uncertain'] or gap or (previous_cycle and
+                not previous_cycle['coverage_complete'] and before['cycle_id'] != previous_cycle['cycle_id'])))
             row = dict(current if current is not None else before)
             row.update({name: cycle[name] for name in CYCLE_COLUMNS})
             row.update({'previous_'+field: before.get(field) for field in [*SOURCE_FIELDS, *NATIVE_FIELDS]})
@@ -99,23 +107,35 @@ def vin_events(cycles, observations, *, absence_days=3):
                 native_status_changed=pd.NA, pending_changed=pd.NA, asking_price_change_usd=pd.NA,
                 estimated_sales=pd.NA, rule_version=RULE_VERSION, absence_days=absence_days)
             if current is not None:
-                event = ('first_observed' if state is None else 'relisted' if current['listing_id'] != before['listing_id']
-                         else 'reappeared' if state['absent'] else 'observed')
+                if state is None:
+                    event = 'first_observed'
+                elif current['listing_id'] != before['listing_id']:
+                    # A new listing ID takes this label even after an absence;
+                    # reappeared_after_absence independently retains that history.
+                    event = 'relisted'
+                elif state['absent']:
+                    event = 'reappeared'
+                else:
+                    event = 'observed'
                 if state:
                     changes = [_change(before.get(field), current.get(field))
                                for field in ['purchase_pending', 'vehicle_lock_type']]
                     row['pending_changed'] = changes[0]
                     # A known change stays true even if another native field is unknown.
                     known_changes = [change for change in changes if pd.notna(change)]
-                    row['native_status_changed'] = (True if any(known_changes) else
-                        False if len(known_changes) == len(changes) else pd.NA)
+                    if any(known_changes):
+                        row['native_status_changed'] = True
+                    elif len(known_changes) == len(changes):
+                        row['native_status_changed'] = False
+                    else:
+                        row['native_status_changed'] = pd.NA
                     prices = [before.get('asking_price_usd'), current.get('asking_price_usd')]
                     if all(pd.notna(x) for x in prices):
                         row['asking_price_change_usd'] = prices[1] - prices[0]
                 state = dict(last=current, first=state['first'] if state else cycle['cycle_id'],
                              streak=0, absent=False, persistent=False, uncertain=False)
             else:
-                if gap or (previous and not previous['coverage_complete']):
+                if gap or (previous_cycle and not previous_cycle['coverage_complete']):
                     state['streak'] = 0
                 state['uncertain'] = uncertain or not cycle['coverage_complete']
                 if not cycle['coverage_complete']:
@@ -128,12 +148,12 @@ def vin_events(cycles, observations, *, absence_days=3):
                     if state['streak'] >= absence_days and not state['persistent']:
                         event, state['persistent'] = 'persistent_absence', True
                 row['timing_uncertain'] = state['uncertain']
-            known[key] = state
+            vehicle_states[key] = state
             row.update(event_type=event, absence_streak=state['streak'],
                 first_observed_cycle_id=state['first'], last_observed_cycle_id=state['last']['cycle_id'])
             # Tuples avoid retaining a second large dictionary for every VIN/day.
             rows.append(tuple(row.get(name, missing) for name in columns))
-        previous = cycle
+        previous_cycle = cycle
     result = pd.DataFrame(rows, columns=columns)
     for column in ['native_status_changed', 'pending_changed']:
         result[column] = result[column].astype('boolean')

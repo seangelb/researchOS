@@ -13,7 +13,8 @@ time and a retained-source reference. An observation interval is not an exact ev
 | Native availability | Schema availability and captured card labels, kept separately | `InStock`, `On hold`, `Purchase in progress`, `Pre-order now` are source text. Pending is not completed. |
 | Delivery estimate | Captured native delivery wording plus capture time and actual ZIP | Do not infer a calendar date from relative text or physical location from ZIP. Shipping charges also depend on ZIP. |
 | Not observed later | Present before, absent after a complete matched-query capture | Observed search disappearance, not a sale. Incomplete periods block change classification. |
-| Inferred removal / possible sale | A future estimate requiring persistent absence, coverage checks and independently reviewed status rules | Not implemented. Cancellations, returns and query movement must be evaluated. |
+| Persistent-absence candidate | A vehicle remains absent for the selected number of consecutive complete, comparable dates | Implemented as a follow-up candidate, not a sale. Gaps and reappearances remain explicit. |
+| Estimated sales | A conversion from observed evidence to transactions requiring supported calibration and validation | A calibrated sales series remains unavailable. Candidate counts and selected native Sold labels are not population sales. |
 | Vendor estimates | Values supplied by a named vendor under its own coverage and event rules | Preserve native values/formulas and unknown definitions; do not treat as ground truth. |
 | Company-reported results | Company's formally reported retail units for its stated period and definition | Separate from scraped listings and vendor estimates; no current conversion model. |
 

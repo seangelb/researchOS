@@ -1,4 +1,8 @@
-"""Retained search evidence -> a separate SQLite history and explicit comparisons."""
+"""Inventory history: retained search pages -> SQLite rows -> period comparisons.
+
+Query runs describe attempts; captures describe pages; observations describe listings.
+Third-party title/auction report events live separately in vehicle_history.py.
+"""
 import hashlib
 from contextlib import closing
 from datetime import datetime, timezone
@@ -105,6 +109,10 @@ def read_query_evidence(report_path, *, diagnostic=False):
     reconcile to its retained pages, native totals, identities and actual timestamps.
     Diagnostic mode can inspect verified source-less checkpoints, with zero rows;
     the default import/recovery contract still rejects those incomplete checkpoints.
+
+    Return one run dictionary, one capture row per retained page, and one observation
+    row per retailer/listing/capture. capture_id hashes the retained capture/projection JSON;
+    page observation and local evidence-availability clocks remain separate.
     """
     report_path = Path(report_path).resolve()
     report = json.loads(report_path.read_text(encoding='utf-8'))
@@ -173,12 +181,20 @@ def read_query_evidence(report_path, *, diagnostic=False):
     identity_ok = (not observations[['retailer','listing_id']].duplicated().any()
                    and not observations.vin.isna().any() and not observations.vin.duplicated().any())
     complete = bool(report['query_complete'])
-    if complete and (parsed.empty or len(parsed) != len(capture_rows) or not identity_ok
-            or clocks.isna().any() or not clocks.is_monotonic_increasing or clocks.duplicated().any()
-            or parsed.page.tolist() != list(range(1,len(parsed)+1))
-            or len(set(totals)) != 1 or len(observations) != totals[0]
-            or report['reported_total'] != totals[0] or len(parsed) != max(1,page_ends[-1])):
-        raise ValueError('Claimed complete query does not reconcile to retained evidence')
+    if complete:
+        # Check in this order: later count checks require actual parsed pages.
+        pages_and_identities_valid = (
+            not parsed.empty and len(parsed) == len(capture_rows) and identity_ok)
+        observation_order_valid = (
+            pages_and_identities_valid and not clocks.isna().any()
+            and clocks.is_monotonic_increasing and not clocks.duplicated().any())
+        pagination_reconciles = (
+            observation_order_valid
+            and parsed.page.tolist() == list(range(1, len(parsed) + 1))
+            and len(set(totals)) == 1 and len(observations) == totals[0]
+            and report['reported_total'] == totals[0] and len(parsed) == max(1, page_ends[-1]))
+        if not pagination_reconciles:
+            raise ValueError('Claimed complete query does not reconcile to retained evidence')
     code = ''.join(file_hash(Path(__file__).parent/name)
                    for name in ('history.py', 'search.py', 'search_evidence.py', 'carvana.py'))
     run = dict(run_id=report['run_id'], report_path=str(report_path), report_sha256=file_hash(report_path),
@@ -293,24 +309,36 @@ def _comparison_clock(value):
 
 def comparison_checks(runs, previous_ids, current_ids):
     """One visible row per coverage rule. False means absence comparisons are blocked."""
-    previous = runs[runs.run_id.isin(previous_ids)]
-    current = runs[runs.run_id.isin(current_ids)]
-    known = (len(previous_ids)==len(set(previous_ids))==len(previous)>0
-             and len(current_ids)==len(set(current_ids))==len(current)>0)
-    start = pd.to_datetime(current.observation_start.map(_comparison_clock),utc=True)
-    end = pd.to_datetime(previous.observation_end.map(_comparison_clock),utc=True)
-    previous_start = pd.to_datetime(previous.observation_start.map(_comparison_clock),utc=True)
-    current_end = pd.to_datetime(current.observation_end.map(_comparison_clock),utc=True)
+    previous_runs = runs[runs.run_id.isin(previous_ids)]
+    current_runs = runs[runs.run_id.isin(current_ids)]
+    selection_known = (
+        len(previous_ids) == len(set(previous_ids)) == len(previous_runs) > 0
+        and len(current_ids) == len(set(current_ids)) == len(current_runs) > 0)
+    current_start = pd.to_datetime(current_runs.observation_start.map(_comparison_clock), utc=True)
+    previous_end = pd.to_datetime(previous_runs.observation_end.map(_comparison_clock), utc=True)
+    previous_start = pd.to_datetime(previous_runs.observation_start.map(_comparison_clock), utc=True)
+    current_end = pd.to_datetime(current_runs.observation_end.map(_comparison_clock), utc=True)
+
+    # These are independent diagnostics; a comparison needs all four to pass.
+    queries_complete = (
+        selection_known and previous_runs.query_complete.eq(1).all()
+        and current_runs.query_complete.eq(1).all())
+    same_query_partitions = (
+        selection_known and previous_runs.context_json.notna().all() and current_runs.context_json.notna().all()
+        and previous_runs.context_json.is_unique and current_runs.context_json.is_unique
+        and set(previous_runs.context_json) == set(current_runs.context_json))
+    fresh_observation_intervals = (
+        selection_known and not set(previous_ids) & set(current_ids)
+        and current_start.notna().all() and previous_end.notna().all()
+        and previous_start.notna().all() and current_end.notna().all()
+        and previous_start.le(previous_end).all() and current_start.le(current_end).all()
+        and current_start.min() > previous_end.max())
     checks = [
-        ('selection',known,'Choose nonempty, known, unique query-run IDs'),
-        ('complete',known and previous.query_complete.eq(1).all() and current.query_complete.eq(1).all(), 'All requested queries must be complete'),
-        ('context',known and previous.context_json.notna().all() and current.context_json.notna().all()
-            and previous.context_json.is_unique and current.context_json.is_unique
-            and set(previous.context_json)==set(current.context_json),'Filters, ZIP, location setting and sort must match without missing partitions'),
-        ('fresh_intervals',known and not set(previous_ids)&set(current_ids) and start.notna().all()
-            and end.notna().all() and previous_start.notna().all() and current_end.notna().all()
-            and previous_start.le(end).all() and start.le(current_end).all()
-            and start.min()>end.max(),'Actual observation windows must be valid, ordered and non-overlapping; reused captures are not fresh')]
+        ('selection', selection_known, 'Choose nonempty, known, unique query-run IDs'),
+        ('complete', queries_complete, 'All requested queries must be complete'),
+        ('context', same_query_partitions, 'Filters, ZIP, location setting and sort must match without missing partitions'),
+        ('fresh_intervals', fresh_observation_intervals,
+         'Actual observation windows must be valid, ordered and non-overlapping; reused captures are not fresh')]
     return pd.DataFrame([dict(check=name,passed=bool(ok),reason='OK' if ok else reason) for name,ok,reason in checks])
 
 

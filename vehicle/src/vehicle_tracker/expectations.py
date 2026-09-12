@@ -84,55 +84,56 @@ def _reported_results_at_cutoff(reported_results, *, cutoff):
     Earlier known revisions can supply that shared first-publication evidence.
     Future revisions cannot supply a denominator or resolve an unknown clock.
     """
-    grouped = {}
+    revisions_by_period = {}
     for supplied in reported_results:
-        available = _aware(supplied['available_at'])
-        if available > cutoff:
+        revision_available_at = _aware(supplied['available_at'])
+        if revision_available_at > cutoff:
             continue
         quarter, definition = supplied['quarter'], supplied['definition']
         period = pd.Period(quarter, freq='Q-DEC')
         if str(period) != quarter or not isinstance(definition, str) or not definition.strip():
             raise ValueError('Reported results require YYYYQn and an explicit definition')
         quarter_end = period.end_time.tz_localize('America/New_York')
-        if available <= quarter_end:
+        if revision_available_at <= quarter_end:
             raise ValueError('Reported result precedes the end of its quarter')
         units, source = supplied['reported_units'], supplied.get('source')
         if (type(units) not in (int, float) or not 0 < units < float('inf')
                 or not isinstance(source, str) or not source.strip()):
             raise ValueError('Reported units must be positive, finite and sourced')
-        first = supplied.get('first_published_at')
-        first_source = supplied.get('first_publication_source')
-        if first is not None:
-            first = _aware(first)
-            if first <= quarter_end or first > available:
+        first_published_at = supplied.get('first_published_at')
+        first_publication_source = supplied.get('first_publication_source')
+        if first_published_at is not None:
+            first_published_at = _aware(first_published_at)
+            if first_published_at <= quarter_end or first_published_at > revision_available_at:
                 raise ValueError('First publication must follow the end of its quarter and not follow revision availability')
-            if not isinstance(first_source, str) or not first_source.strip():
+            if not isinstance(first_publication_source, str) or not first_publication_source.strip():
                 raise ValueError('Known first publication requires first_publication_source')
         else:
-            first_source = None
-        grouped.setdefault((quarter, definition), []).append(dict(
-            reported_units=float(units), available_at=available, source=source,
-            first_published_at=first, first_publication_source=first_source))
+            first_publication_source = None
+        revisions_by_period.setdefault((quarter, definition), []).append(dict(
+            reported_units=float(units), available_at=revision_available_at, source=source,
+            first_published_at=first_published_at, first_publication_source=first_publication_source))
 
-    selected = {}
-    for key, revisions in grouped.items():
+    selected_results = {}
+    for period_and_definition, revisions in revisions_by_period.items():
         revisions.sort(key=lambda row: row['available_at'])
         if len({row['available_at'] for row in revisions}) != len(revisions):
             raise ValueError('Choose one explicit reported-result vintage per quarter/definition/available_at')
-        first_records = [row for row in revisions if row['first_published_at'] is not None]
-        if len({row['first_published_at'] for row in first_records}) > 1:
+        first_publication_records = [row for row in revisions if row['first_published_at'] is not None]
+        if len({row['first_published_at'] for row in first_publication_records}) > 1:
             raise ValueError('Conflicting first-publication clocks across known reported revisions')
-        chosen = dict(revisions[-1], known_revision_count=len(revisions))
-        if first_records:
-            first_record = first_records[0]
+        latest_revision = dict(revisions[-1], known_revision_count=len(revisions))
+        if first_publication_records:
+            first_publication_record = first_publication_records[0]
             # A later record cannot move first publication beyond an already
             # available original result, even when that original clock is missing.
-            if first_record['first_published_at'] > revisions[0]['available_at']:
+            if first_publication_record['first_published_at'] > revisions[0]['available_at']:
                 raise ValueError('First publication follows an earlier known reported result')
-            chosen.update(first_published_at=first_record['first_published_at'],
-                          first_publication_source=first_record['first_publication_source'])
-        selected[key] = chosen
-    return selected
+            latest_revision.update(
+                first_published_at=first_publication_record['first_published_at'],
+                first_publication_source=first_publication_record['first_publication_source'])
+        selected_results[period_and_definition] = latest_revision
+    return selected_results
 
 
 def forecast_review_rows(paths, reported_results, *, as_of):
@@ -144,8 +145,9 @@ def forecast_review_rows(paths, reported_results, *, as_of):
     first publication remains unresolved. All result inputs are explicit and local;
     no revisions or company results are fetched, and no frozen files are rewritten.
     """
-    cutoff, output, identities = _aware(as_of), [], set()
-    results = _reported_results_at_cutoff(reported_results, cutoff=cutoff)
+    cutoff = _aware(as_of)
+    forecast_rows, forecast_ids_seen = [], set()
+    known_results = _reported_results_at_cutoff(reported_results, cutoff=cutoff)
     for path in paths:
         forecast = json.loads(Path(path).read_text(encoding='utf-8'))
         if forecast.get('format') != 'carvana-quarter-forecast-v1':
@@ -153,12 +155,13 @@ def forecast_review_rows(paths, reported_results, *, as_of):
         claimed_hash = forecast.pop('forecast_sha256', None)
         if hashlib.sha256(json.dumps(forecast, sort_keys=True, allow_nan=False).encode()).hexdigest() != claimed_hash:
             raise ValueError('Saved forecast changed')
-        if _aware(forecast['saved_at']) > cutoff:
+        forecast_saved_at = _aware(forecast['saved_at'])
+        if forecast_saved_at > cutoff:
             continue
         _validate_forecast(forecast, saved_at=forecast['saved_at'])
-        if forecast['forecast_id'] in identities:
+        if forecast['forecast_id'] in forecast_ids_seen:
             raise ValueError('Duplicate forecast ID; retain revisions under distinct IDs')
-        identities.add(forecast['forecast_id'])
+        forecast_ids_seen.add(forecast['forecast_id'])
         if not forecast.get('source_sha256') or any(hashlib.sha256(Path(p).read_bytes()).hexdigest() != sha
                 for p, sha in forecast['source_sha256'].items()):
             raise ValueError('Frozen forecast source evidence changed or is missing')
@@ -168,18 +171,27 @@ def forecast_review_rows(paths, reported_results, *, as_of):
             forecast_path=str(path), status='awaiting reported result', reported_units=None,
             reported_available_at=None, reported_source=None, reported_first_published_at=None,
             reported_first_publication_source=None, known_result_revisions=0, prospective_eligible=None)
-        result = results.get((forecast['quarter'], forecast['definition']))
+        result = known_results.get((forecast['quarter'], forecast['definition']))
         if result is not None:
-            first = result['first_published_at']
-            eligible = _aware(forecast['saved_at']) < first if first is not None else None
-            status = ('first publication unknown; prospective eligibility unresolved' if eligible is None
-                else 'eligible' if eligible else 'saved after result; exclude from accuracy')
+            first_published_at = result['first_published_at']
+            # A known revision supplies a denominator. The independent first
+            # publication clock decides whether this saved forecast may be scored.
+            if first_published_at is None:
+                eligible = None
+                status = 'first publication unknown; prospective eligibility unresolved'
+            elif forecast_saved_at < first_published_at:
+                eligible = True
+                status = 'eligible'
+            else:
+                eligible = False
+                status = 'saved after result; exclude from accuracy'
             row.update(reported_units=result['reported_units'], reported_available_at=result['available_at'].isoformat(),
-                reported_source=result['source'], reported_first_published_at=first.isoformat() if first is not None else None,
+                reported_source=result['source'],
+                reported_first_published_at=first_published_at.isoformat() if first_published_at is not None else None,
                 reported_first_publication_source=result['first_publication_source'],
                 known_result_revisions=result['known_revision_count'], prospective_eligible=eligible, status=status)
-        output.append(row)
-    return pd.DataFrame(output)
+        forecast_rows.append(row)
+    return pd.DataFrame(forecast_rows)
 
 
 def quarter_coverage(cycles, *, as_of, quarter, timezone_name, max_age_hours=36):
@@ -260,13 +272,17 @@ def revision_bridge(previous, current, *, prior_activity_revised):
         raise ValueError('Scenario inputs must be finite and nonnegative')
     if prior_activity_revised > current['activity'] or current['remaining_days'] > previous['remaining_days']:
         raise ValueError('Invalid common-date activity or remaining days')
-    p, c = previous, current
+    revised_common_date_units = (prior_activity_revised-previous['activity'])*previous['conversion']
+    new_date_units = (current['activity']-prior_activity_revised)*previous['conversion']
+    calendar_roll_units = (current['remaining_days']-previous['remaining_days'])*previous['daily_rate']
+    conversion_change_units = current['activity']*(current['conversion']-previous['conversion'])
+    daily_rate_change_units = current['remaining_days']*(current['daily_rate']-previous['daily_rate'])
     return pd.DataFrame([
-        ('Revised common-date observations', (prior_activity_revised-p['activity'])*p['conversion']),
-        ('New observation dates', (c['activity']-prior_activity_revised)*p['conversion']),
-        ('Calendar roll', (c['remaining_days']-p['remaining_days'])*p['daily_rate']),
-        ('Changed conversion assumption', c['activity']*(c['conversion']-p['conversion'])),
-        ('Changed remaining-day assumption', c['remaining_days']*(c['daily_rate']-p['daily_rate']))],
+        ('Revised common-date observations', revised_common_date_units),
+        ('New observation dates', new_date_units),
+        ('Calendar roll', calendar_roll_units),
+        ('Changed conversion assumption', conversion_change_units),
+        ('Changed remaining-day assumption', daily_rate_change_units)],
         columns=['component', 'scenario_unit_change'])
 
 

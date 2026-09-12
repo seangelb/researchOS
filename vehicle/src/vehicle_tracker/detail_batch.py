@@ -42,7 +42,11 @@ def _reservation_lock(root, *, now):
 
 
 def _workload(root, *, now):
-    """Count starts, including failures, under the caller's reservation lock."""
+    """Read saved starts, including failures and unfinished reservations.
+
+    A reservation records a browser attempt, not a native vehicle outcome.
+    New-start callers hold the shared lock; read-only previews do not reserve.
+    """
     cutoff = _aware(now)
     visits = []
     for path in sorted(Path(root).glob('*/batch.json')):
@@ -72,10 +76,18 @@ def _workload(root, *, now):
                and v['checked_at'] > cutoff-pd.Timedelta(hours=24)]
     if blocked:
         next_start = max(next_start, max(blocked)+pd.Timedelta(hours=24))
-    reason = ('Unresolved browser visit: recover or explicitly fail it first' if unresolved else
-              'Access challenge: all browser batches pause for 24 hours after the blocked check' if blocked else
-              'Rolling 24-hour limit of 12 browser starts reached' if len(recent) >= ROLLING_DAY_LIMIT else
-              'Wait 15 seconds after the latest saved browser visit' if next_start > cutoff else '')
+    # Explain the highest-priority restriction; preserve every lower-priority
+    # clock above so resolving one restriction does not reset another.
+    if unresolved:
+        reason = 'Unresolved browser visit: recover or explicitly fail it first'
+    elif blocked:
+        reason = 'Access challenge: all browser batches pause for 24 hours after the blocked check'
+    elif len(recent) >= ROLLING_DAY_LIMIT:
+        reason = 'Rolling 24-hour limit of 12 browser starts reached'
+    elif next_start > cutoff:
+        reason = 'Wait 15 seconds after the latest saved browser visit'
+    else:
+        reason = ''
     return dict(as_of=cutoff.isoformat(), rolling_24h_limit=ROLLING_DAY_LIMIT,
         attempted_last_24h=len(recent), remaining_starts=max(0, ROLLING_DAY_LIMIT-len(recent)),
         unresolved_visits=unresolved, access_blocks_last_24h=len(blocked),
@@ -98,13 +110,14 @@ def browser_workload(root, *, now):
 
 def browser_capacity(root, requests, *, now, prior_checks=(), minutes_per_check=1.5,
                      operator_minutes_per_day=20):
-    """Schedule a small proposed study against retained starts without writing.
+    """Check whether proposed visits fit the saved budget and windows; no writes.
 
     Each request has wave, retailer, VIN, start and end. Capacity means requests
     that fit, including assumed capture/save time and 15 seconds after saving.
     Operator time is an explicit planning assumption, including historical starts
     whose active effort was not measured. Future unrelated work is not reserved.
     An unresolved visit or lock has no assumed recovery time and blocks approval.
+    Planned times are calculations, not reservations or automatic navigation.
     """
     for value in [minutes_per_check, operator_minutes_per_day]:
         if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
@@ -150,9 +163,15 @@ def browser_capacity(root, requests, *, now, prior_checks=(), minutes_per_check=
                 start = recent[len(recent)-daily_limit]+pd.Timedelta(hours=24)
                 recent = sorted(s for s in starts if start-pd.Timedelta(hours=24) < s <= start)
         fits = not blocked and start + duration < deadline
+        if blocked:
+            reason = blocked
+        elif fits:
+            reason = ''
+        else:
+            reason = 'Insufficient time/capacity before the fixed deadline'
         scheduled.append(dict(**request, planned_start=start.isoformat() if fits else None,
             planned_capture_at=(start+duration).isoformat() if fits else None, fits=bool(fits),
-            reason=blocked if blocked else '' if fits else 'Insufficient time/capacity before the fixed deadline'))
+            reason=reason))
         if fits:
             starts.append(start)
             last_checked[(request['retailer'], request['vin'])] = start+duration

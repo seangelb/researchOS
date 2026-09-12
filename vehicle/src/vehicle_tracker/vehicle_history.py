@@ -1,4 +1,8 @@
-"""Read-only vehicle-history research and explicit, verified follow-up identities."""
+"""Third-party vehicle-report events and verified follow-up listing identities.
+
+These report events do not establish Carvana retail sales. Daily inventory
+observations and SQLite history are handled separately in history.py and daily.py.
+"""
 import hashlib
 import json
 from pathlib import Path
@@ -124,58 +128,61 @@ def followup_identities(cohort_frame, pilot_records, inventory_source_rows, *, a
         return pd.DataFrame(columns=FOLLOWUP_COLUMNS)
     if cohort_frame.duplicated(['retailer', 'vin']).any():
         raise ValueError('Follow-up membership must contain distinct retailer/VINs')
-    candidates, originals = [], []
-    for row in cohort_frame.to_dict('records'):
+    verified_identities, original_bindings = [], []
+    cohort_records = cohort_frame.to_dict('records')
+    for row in cohort_records:
         if row['retailer'] != 'carvana' or _url_id(row['url']) != row['listing_id']:
             raise ValueError('Original follow-up identity requires a numeric Carvana listing URL')
-        originals.append(dict(retailer=row['retailer'], vin=row['vin'], listing_id=row['listing_id']))
-    for kind, frame in [('page', pilot_records), ('inventory', inventory_source_rows)]:
-        for row in frame.to_dict('records'):
-            physical_field = 'checked_at' if kind == 'page' else 'inventory_observed_at'
-            physical = row.get(physical_field, row.get('observed_at_utc'))
-            local = row.get('inventory_available_at', row.get('available_at'))
-            observed, available = _aware(physical), _aware(local)
-            if observed > cutoff or available > cutoff:
+        original_bindings.append(dict(retailer=row['retailer'], vin=row['vin'], listing_id=row['listing_id']))
+    for evidence_kind, source_rows in [('page', pilot_records), ('inventory', inventory_source_rows)]:
+        observation_field = 'checked_at' if evidence_kind == 'page' else 'inventory_observed_at'
+        for row in source_rows.to_dict('records'):
+            observed_at = _aware(row.get(observation_field, row.get('observed_at_utc')))
+            available_at = _aware(row.get('inventory_available_at', row.get('available_at')))
+            if observed_at > cutoff or available_at > cutoff:
                 continue
-            if available < observed:
+            if available_at < observed_at:
                 raise ValueError('Identity availability cannot precede its observation')
             if row.get('retailer') != 'carvana':
                 continue
-            listing = row.get('listing_id')
+            listing_id = row.get('listing_id')
             vin = row.get('vin')
-            if (not isinstance(listing, str) or not re.fullmatch(r'\d+', listing)
+            if (not isinstance(listing_id, str) or not re.fullmatch(r'\d+', listing_id)
                     or not isinstance(vin, str) or not re.fullmatch(r'[A-HJ-NPR-Z0-9]{17}', vin)):
                 continue
-            if kind == 'page':
-                matched = (row.get('parse_outcome') == 'matched'
+            if evidence_kind == 'page':
+                page_identity_matches = (row.get('parse_outcome') == 'matched'
                     and row.get('saleStatus') in ['Available', 'Sold']
                     and row.get('observed_vin') == row.get('vin')
-                    and str(row.get('observed_listing_id')) == listing
-                    and _url_id(row.get('requested_url')) == listing
-                    and _url_id(row.get('final_url')) == listing)
-                if not matched:
+                    and str(row.get('observed_listing_id')) == listing_id
+                    and _url_id(row.get('requested_url')) == listing_id
+                    and _url_id(row.get('final_url')) == listing_id)
+                if not page_identity_matches:
                     continue
-            elif _url_id(row.get('listing_url')) != listing:
+            elif _url_id(row.get('listing_url')) != listing_id:
                 continue
-            candidates.append(dict(retailer=row['retailer'], vin=row['vin'], listing_id=listing,
-                observed_at=observed, available_at=available,
-                source=row.get('source') if kind == 'page' else row.get('source_path', row.get('source_url')),
-                kind=kind))
-    bindings = pd.DataFrame([*originals, *candidates])
+            verified_identities.append(dict(retailer=row['retailer'], vin=row['vin'], listing_id=listing_id,
+                observed_at=observed_at, available_at=available_at,
+                source=row.get('source') if evidence_kind == 'page' else row.get('source_path', row.get('source_url')),
+                kind=evidence_kind))
+    bindings = pd.DataFrame([*original_bindings, *verified_identities])
     if bindings.groupby(['retailer', 'listing_id']).vin.nunique(dropna=False).gt(1).any():
         raise ValueError('A verified listing ID is bound to conflicting VINs')
     output = []
-    for original in cohort_frame.to_dict('records'):
+    for original in cohort_records:
         item = dict(retailer=original['retailer'], vin=original['vin'],
             original_listing_id=original['listing_id'], original_url=original['url'],
             followup_listing_id=original['listing_id'], followup_url=original['url'],
             followup_observed_at=pd.NaT, followup_available_at=pd.NaT, followup_source=None,
             followup_reason='Original cohort reference; no verified observation available at cutoff.')
-        matching = [row for row in candidates if row['retailer'] == original['retailer'] and row['vin'] == original['vin']]
-        if matching:
-            latest = max(matching, key=lambda row: (row['observed_at'], row['available_at']))
-            tied = [row['listing_id'] for row in matching if row['observed_at'] == latest['observed_at']]
-            if len(set(tied)) > 1:
+        vehicle_identities = [row for row in verified_identities
+                              if row['retailer'] == original['retailer'] and row['vin'] == original['vin']]
+        if vehicle_identities:
+            # Availability admits evidence; physical observation time ranks it.
+            latest = max(vehicle_identities, key=lambda row: (row['observed_at'], row['available_at']))
+            simultaneous_listings = {row['listing_id'] for row in vehicle_identities
+                                     if row['observed_at'] == latest['observed_at']}
+            if len(simultaneous_listings) > 1:
                 raise ValueError('Simultaneous verified listings leave the latest follow-up identity ambiguous')
             item.update(followup_listing_id=latest['listing_id'],
                 followup_url='https://www.carvana.com/vehicle/' + latest['listing_id'],

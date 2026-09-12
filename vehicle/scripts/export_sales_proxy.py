@@ -70,6 +70,12 @@ def main():
     initial = {fingerprint_key(p): sha(p) for folder in ['data', 'config']
                for p in retained_files(root / 'vehicle' / folder)}
     initial.update(source_hashes)
+    # Selected cycles may live outside vehicle/data. Fingerprint their retained
+    # companions now, including JSON/bin files only discovered after execution.
+    for cycle in args.cycle_report or []:
+        for path in retained_files(cycle.parent):
+            if path.suffix in {'.json', '.bin'}:
+                initial.setdefault(fingerprint_key(path), sha(path))
     # SQLite reads bypass Path.read_bytes/read_text, including databases selected
     # outside vehicle/data. Keep any earlier prescan hash if this path was covered.
     if args.database:

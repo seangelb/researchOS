@@ -131,7 +131,11 @@ def search_transport(post=None):
 def collect_search(*, filters, zip_code, destination, target_listings=1000, budget=None, post=None,
                    location_filter=False, known_listing_ids=None, target_vins=None,
                    known_listing_vins=None, page_progress=None):
-    """Collect one query with immutable evidence and an explicit attempt journal."""
+    """Collect one query into retained files, a page journal and a query database.
+
+    A supplied budget is shared across queries; this function does not reset it.
+    Earlier-query identities measure overlap without discarding this query's rows.
+    """
     with search_transport(post) as send:
         return _collect_search(filters=filters, zip_code=zip_code, destination=destination,
             target_listings=target_listings, budget=budget, post=send,
@@ -143,6 +147,12 @@ def collect_search(*, filters, zip_code, destination, target_listings=1000, budg
 def _collect_search(*, filters, zip_code, destination, target_listings, budget, post,
                     location_filter, known_listing_ids, target_vins, known_listing_vins,
                     page_progress):
+    """Advance each page from reservation through retention to parsed storage.
+
+    ``stage`` identifies the operation whose failure stopped collection. Keep the
+    checkpoints in order: a response can be received before its source is durable,
+    and a retained source can still fail projection, identity or database checks.
+    """
     if not re.fullmatch(r'\d{5}', zip_code) or (target_listings is not None and
             (type(target_listings) is not int or target_listings < 1)) or type(location_filter) is not bool:
         raise ValueError('Require a five-digit ZIP and positive listing target')
@@ -156,12 +166,12 @@ def _collect_search(*, filters, zip_code, destination, target_listings, budget, 
     destination.mkdir(parents=True, exist_ok=False)
     (destination/'attempts').mkdir()
     budget = budget or NavigationBudget()
-    run_id, seen, vins = uuid4().hex, set(), set()
-    known = {identity for retailer, identity in (known_listing_ids or set()) if retailer == 'carvana'}
-    known_pairs = dict(known_listing_vins or {})
-    known_vins = set(known_pairs.values())
-    known_vin_listings = {vin: listing for listing, vin in known_pairs.items()}
-    if len(known_vin_listings) != len(known_pairs):
+    run_id, query_listing_ids, query_vins = uuid4().hex, set(), set()
+    earlier_listing_ids = {identity for retailer, identity in (known_listing_ids or set()) if retailer == 'carvana'}
+    earlier_listing_vins = dict(known_listing_vins or {})
+    earlier_vins = set(earlier_listing_vins.values())
+    earlier_vin_listings = {vin: listing for listing, vin in earlier_listing_vins.items()}
+    if len(earlier_vin_listings) != len(earlier_listing_vins):
         raise ValueError('Known VINs have conflicting listing identities')
     start_requests, started = budget.requests, time.monotonic()
     report = dict(run_id=run_id, filters=filters, zip_code=zip_code, endpoint=ENDPOINT,
@@ -180,14 +190,15 @@ def _collect_search(*, filters, zip_code, destination, target_listings, budget, 
     number = 1
 
     def checkpoint(entry=None):
-        report.update(unique_listings=len(seen), unique_vins=len(vins), reported_total=total,
-            complete_query_count=len(seen) if report['query_complete'] else None,
-            new_unique_listings=len(seen-known), target_reached=target_listings is not None and len(seen-known)>=target_listings,
-            new_unique_vins=len(vins-known_vins),
+        report.update(unique_listings=len(query_listing_ids), unique_vins=len(query_vins), reported_total=total,
+            complete_query_count=len(query_listing_ids) if report['query_complete'] else None,
+            new_unique_listings=len(query_listing_ids - earlier_listing_ids),
+            target_reached=target_listings is not None and len(query_listing_ids - earlier_listing_ids) >= target_listings,
+            new_unique_vins=len(query_vins - earlier_vins),
             requests=budget.requests-start_requests, elapsed_seconds=time.monotonic()-started,
             ended_utc=datetime.now(timezone.utc).isoformat())
         if target_vins is not None:
-            report['target_reached'] = len(vins-known_vins) >= target_vins
+            report['target_reached'] = len(query_vins - earlier_vins) >= target_vins
         if entry is not None:
             write_json_atomic(destination/'attempts'/f"{entry['page']:04d}.json",
                 dict(run_id=run_id, request=request, **entry))
@@ -203,7 +214,7 @@ def _collect_search(*, filters, zip_code, destination, target_listings, budget, 
         capture = dict(page_url='https://www.carvana.com/cars', captured_at_utc=None,
             request=request, capture_method='failed_search', records=[], attempt_id=entry['attempt_id'])
         report['pages'].append(entry)
-        retained, response, interrupted = None, None, None
+        capture_path, response, interrupted = None, None, None
         stage = 'budget_exhausted'
         checkpoint(entry)  # Discoverable even if the process dies before transport.
         try:
@@ -250,8 +261,8 @@ def _collect_search(*, filters, zip_code, destination, target_listings, budget, 
             capture = dict(project_response(source, request, observed_at=stamp),
                            attempt_id=entry['attempt_id'], response_evidence=evidence)
             stage = 'storage_failure'
-            retained = retain_capture(capture, destination/'raw')
-            entry.update(retained_source=str(retained), source_sha256=hashlib.sha256(retained.read_bytes()).hexdigest(),
+            capture_path = retain_capture(capture, destination/'raw')
+            entry.update(retained_source=str(capture_path), source_sha256=hashlib.sha256(capture_path.read_bytes()).hexdigest(),
                 source_hash_scope='SHA-256 of selected projection JSON bytes',
                 evidence_available_at_utc=datetime.now(timezone.utc).isoformat(), status='retained')
             checkpoint(entry)  # Retention and the SQLite commit are separate steps.
@@ -268,39 +279,40 @@ def _collect_search(*, filters, zip_code, destination, target_listings, budget, 
             stage = 'pagination_unstable'
             if (total, pages_total) != (page_info['totalMatchedInventory'], page_info['totalMatchedPages']):
                 raise CollectionStopped('Displayed totals changed during enumeration')
-            current, current_vins = set(frame.listing_id), set(frame.vin.dropna())
-            if current & seen or current_vins & vins or frame.vin.isna().any():
+            page_listing_ids, page_vins = set(frame.listing_id), set(frame.vin.dropna())
+            if page_listing_ids & query_listing_ids or page_vins & query_vins or frame.vin.isna().any():
                 raise CollectionStopped('Repeated or missing identities; query coverage unstable')
             if target_vins is not None:
                 expected_rows = min(24, max(0, total - 24 * (number - 1)))
                 if len(frame) != expected_rows:
                     raise CollectionStopped('Page row count differs from declared pagination')
             stage = 'identity_failure'
-            pairs = dict(zip(frame.listing_id, frame.vin))
+            page_listing_vins = dict(zip(frame.listing_id, frame.vin))
             conflicts = [dict(listing_id=listing, vin=vin,
-                              earlier_vin=known_pairs.get(listing),
-                              earlier_listing_id=known_vin_listings.get(vin))
-                         for listing, vin in pairs.items()
-                         if ((listing in known_pairs and known_pairs[listing] != vin)
-                             or (vin in known_vin_listings and known_vin_listings[vin] != listing))]
+                              earlier_vin=earlier_listing_vins.get(listing),
+                              earlier_listing_id=earlier_vin_listings.get(vin))
+                         for listing, vin in page_listing_vins.items()
+                         if ((listing in earlier_listing_vins and earlier_listing_vins[listing] != vin)
+                             or (vin in earlier_vin_listings and earlier_vin_listings[vin] != listing))]
             entry['identity_conflicts'] = conflicts
-            entry['overlapping_rows'] = sum(known_pairs.get(listing) == vin for listing, vin in pairs.items())
+            entry['overlapping_rows'] = sum(earlier_listing_vins.get(listing) == vin
+                                            for listing, vin in page_listing_vins.items())
             if conflicts:
                 raise CollectionStopped('Conflicting VIN/listing identity across plan queries')
             stage = 'storage_failure'
-            entry['stored_rows'] = store_capture(destination/'vehicle.sqlite', run_id=run_id, page_number=number, raw_file=retained)
+            entry['stored_rows'] = store_capture(destination/'vehicle.sqlite', run_id=run_id, page_number=number, raw_file=capture_path)
             entry.update(status='parsed', outcome_kind='success')
-            seen.update(current)
-            vins.update(current_vins)
+            query_listing_ids.update(page_listing_ids)
+            query_vins.update(page_vins)
             if number == max(1, pages_total):
-                report['query_complete'] = len(seen) == total
+                report['query_complete'] = len(query_listing_ids) == total
                 report['status'] = 'complete_query' if report['query_complete'] else 'partial'
                 report['reason'] = '' if report['query_complete'] else 'Unique count differs from reported total'
                 if not report['query_complete']:
                     report['outcome_kind'] = 'pagination_unstable'
                     budget.stop()
-            elif ((target_listings is not None and len(seen - known) >= target_listings)
-                  or (target_vins is not None and len(vins - known_vins) >= target_vins)):
+            elif ((target_listings is not None and len(query_listing_ids - earlier_listing_ids) >= target_listings)
+                  or (target_vins is not None and len(query_vins - earlier_vins) >= target_vins)):
                 report.update(reason='Target reached; remaining query pages were not collected', outcome_kind='sample_limit')
             checkpoint(entry)
             if page_progress is not None:
@@ -333,11 +345,11 @@ def _collect_search(*, filters, zip_code, destination, target_listings, budget, 
             else:
                 entry['status'] = 'failed'
                 try:
-                    retained = retained or retain_capture(capture, destination/'raw')
-                    entry.update(retained_source=str(retained), source_sha256=hashlib.sha256(retained.read_bytes()).hexdigest(),
+                    capture_path = capture_path or retain_capture(capture, destination/'raw')
+                    entry.update(retained_source=str(capture_path), source_sha256=hashlib.sha256(capture_path.read_bytes()).hexdigest(),
                         source_hash_scope='SHA-256 of selected projection/failure JSON bytes',
                         evidence_available_at_utc=datetime.now(timezone.utc).isoformat())
-                    store_capture(destination/'vehicle.sqlite', run_id=run_id, page_number=number, raw_file=retained, error=reason)
+                    store_capture(destination/'vehicle.sqlite', run_id=run_id, page_number=number, raw_file=capture_path, error=reason)
                 except Exception:
                     entry['database_outcome'] = 'unconfirmed'
                     report['outcome_kind'] = 'storage_failure'
@@ -349,8 +361,8 @@ def _collect_search(*, filters, zip_code, destination, target_listings, budget, 
         if interrupted is not None:
             raise interrupted
         if (report['status']=='blocked' or number==max(1, pages_total or 0)
-                or (target_listings is not None and len(seen-known)>=target_listings)
-                or (target_vins is not None and len(vins-known_vins)>=target_vins)):
+                or (target_listings is not None and len(query_listing_ids - earlier_listing_ids) >= target_listings)
+                or (target_vins is not None and len(query_vins - earlier_vins) >= target_vins)):
             break
         number += 1
     return report

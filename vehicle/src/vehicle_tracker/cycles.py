@@ -88,7 +88,13 @@ def cycle_lock(directory):
 
 
 class CycleBudget(NavigationBudget):
-    """The existing sequential budget, persisted before transport across attempts."""
+    """Share request counts, spacing and elapsed time across a cycle's attempts.
+
+    Saved UTC clocks reconstruct this process's monotonic budget. Downtime counts
+    against the original allowance. Every reservation consumes a request, including
+    an uncertain outcome; only its pending flag clears when evidence is durable.
+    A stopped or uncertain cycle cannot retry.
+    """
     def __init__(self, path):
         self.path = Path(path)
         state = _cycle_state(self.path)
@@ -99,14 +105,18 @@ class CycleBudget(NavigationBudget):
             raise ValueError('Cycle stopped after an access/transport failure')
         self.max_requests = state['max_requests']
         now = utcnow()
-        elapsed = (now-aware(state['created_at'])).total_seconds()
-        if elapsed < 0 or (saved['last_request_utc'] and aware(saved['last_request_utc']) > now):
+        elapsed_seconds = (now - aware(state['created_at'])).total_seconds()
+        if elapsed_seconds < 0 or (saved['last_request_utc'] and aware(saved['last_request_utc']) > now):
             raise ValueError('Current clock precedes the durable cycle budget; cannot resume')
-        self.max_seconds = min(state['max_seconds'],(aware(state['window_end'])-aware(state['created_at'])).total_seconds())
-        self.started = time.monotonic()-elapsed
+        window_seconds = (aware(state['window_end']) - aware(state['created_at'])).total_seconds()
+        self.max_seconds = min(state['max_seconds'], window_seconds)
+        self.started = time.monotonic() - elapsed_seconds
         self.requests, self.stopped, self.pause_seconds = saved['requests'], False, 3
-        self.last_request = (time.monotonic()-(now-aware(saved['last_request_utc'])).total_seconds()
-                             if saved['last_request_utc'] else None)
+        if saved['last_request_utc']:
+            # Reconstruct spacing from the last attempt, not this process's start.
+            self.last_request = time.monotonic() - (now - aware(saved['last_request_utc'])).total_seconds()
+        else:
+            self.last_request = None
         self.last_request_utc = saved['last_request_utc']
 
     def save(self, pending=None):
@@ -129,6 +139,11 @@ class CycleBudget(NavigationBudget):
         # acknowledging the response; no filesystem delay belongs before transport.
 
     def response_received(self):
+        """Clear only the pending-reservation flag; consumed request count stays unchanged.
+
+        The caller has checkpointed response evidence. This acknowledgement does
+        not certify parsed rows or complete coverage.
+        """
         self.save(pending=False)
 
     def stop(self):
@@ -175,7 +190,9 @@ def _read_cycle_evidence(path, *, as_of=None):
                 raise ValueError('Query attempt differs from the cycle plan')
             reports.append(report)
             replayed[str(report)] = (captures, observations)
-            if query['query_id'] not in selected or not selected[query['query_id']]['query_complete']:
+            previous_run = selected.get(query['query_id'])
+            # Keep the first complete run; otherwise a later eligible attempt wins.
+            if previous_run is None or not previous_run['query_complete']:
                 selected[query['query_id']] = dict(run,report_path=str(report))
     if state['budget']['requests'] < reported_requests:
         raise ValueError('Durable cycle budget understates retained query requests')

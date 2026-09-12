@@ -25,38 +25,42 @@ def load_detail_evidence(root, as_of, *, cohorts=None):
 
     An explicit cohort list preserves existing caller selection. The default uses
     the two configured cohorts. All source readers retain their identity/hash checks.
+    Returned records are page observations; selection_plans are intended checks.
+    Each research_pass also retains its own sample and observations for inspection.
     """
     root = Path(root)
     cohorts = (load_detail_cohorts(root, as_of) if cohorts is None else
                known_disjoint_cohorts(cohorts, as_of=as_of))
-    paths = {root/name for name in COHORT_FILES}
-    frames = [load_pilot(root, cohort, as_of=as_of) for cohort in cohorts]
+    input_paths = {root/name for name in COHORT_FILES}
+    observation_frames = [load_pilot(root, cohort, as_of=as_of) for cohort in cohorts]
     # Pilot run manifests bind source identity and availability, as well as captures.
-    paths.update((root/'data/experiments/carvana_sale_signals').glob('*/run.json'))
-    paths.update(root/cohort['baseline_source'] for cohort in cohorts
-                 if cohort.get('baseline_source') and (root/cohort['baseline_source']).is_file())
-    plans, research_passes = [], {}
-    review = root/'data/experiments/vendor_review/20260911T162600Z'
+    input_paths.update((root/'data/experiments/carvana_sale_signals').glob('*/run.json'))
+    input_paths.update(root/cohort['baseline_source'] for cohort in cohorts
+                       if cohort.get('baseline_source') and (root/cohort['baseline_source']).is_file())
+    selection_frames, research_passes = [], {}
+    review_directory = root/'data/experiments/vendor_review/20260911T162600Z'
     for plan_name, pass_name in [('visible_check_plan.json', 'pass.json'),
                                  ('exit_batch_plan.json', 'exit_batch_pass.json')]:
-        selected = load_selection_plan(review/plan_name, as_of=as_of)
-        report, records = load_research_pass(review/pass_name, selected, cohorts, as_of=as_of)
-        research_passes[pass_name] = dict(report=report, selected=selected, records=records)
-        plans.append(selected)
-        frames.append(records)
-        paths.update([review/plan_name, review/pass_name])
+        selected = load_selection_plan(review_directory/plan_name, as_of=as_of)
+        pass_report, pass_records = load_research_pass(
+            review_directory/pass_name, selected, cohorts, as_of=as_of)
+        research_passes[pass_name] = dict(report=pass_report, selected=selected, records=pass_records)
+        selection_frames.append(selected)
+        observation_frames.append(pass_records)
+        input_paths.update([review_directory/plan_name, review_directory/pass_name])
     browser_records, browser_plans, browser_health, browser_paths = load_browser_batches(root, cohorts, as_of=as_of)
-    frames.append(browser_records)
-    plans.append(browser_plans)
-    frames, plans = [f for f in frames if not f.empty], [p for p in plans if not p.empty]
-    records = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
-    selections = pd.concat(plans, ignore_index=True) if plans else pd.DataFrame()
-    paths.update(browser_paths)
+    observation_frames.append(browser_records)
+    selection_frames.append(browser_plans)
+    observation_frames = [frame for frame in observation_frames if not frame.empty]
+    selection_frames = [frame for frame in selection_frames if not frame.empty]
+    records = pd.concat(observation_frames, ignore_index=True) if observation_frames else pd.DataFrame()
+    selections = pd.concat(selection_frames, ignore_index=True) if selection_frames else pd.DataFrame()
+    input_paths.update(browser_paths)
     if not records.empty:
-        paths.update(Path(p) for p in records.source if Path(p).is_file())
+        input_paths.update(Path(path) for path in records.source if Path(path).is_file())
     return dict(cohorts=cohorts, records=records, selection_plans=selections,
                 research_passes=research_passes, browser_records=browser_records,
-                browser_health=browser_health, input_paths=paths)
+                browser_health=browser_health, input_paths=input_paths)
 
 
 def load_trial_review(selections, *, as_of):
@@ -99,13 +103,15 @@ def load_trial_review(selections, *, as_of):
                 raise ValueError('Trial source changed; reconcile before using capacity evidence.')
             trial_input_paths.add(source_path)
         counts, timing = trial['counts'], trial['timing']
+        complete_plan = (counts.get('planned_queries') is not None
+                         and counts.get('complete_queries') == counts['planned_queries'])
         partial_queries = counts.get('partial_queries', counts.get('blocked_partial_queries'))
         # The small full-plan audit has no partial field; zero follows from all queries completing.
-        if partial_queries is None and counts.get('planned_queries') is not None and counts.get('complete_queries') == counts['planned_queries']:
+        if partial_queries is None and complete_plan:
             partial_queries = 0
         complete_vins = counts.get('verified_vins_in_complete_queries')
         # If every declared query completed, every verified distinct VIN belongs to complete queries.
-        if complete_vins is None and counts.get('planned_queries') is not None and counts.get('complete_queries') == counts['planned_queries']:
+        if complete_vins is None and complete_plan:
             complete_vins = counts.get('distinct_vins', counts.get('unique_vins'))
         row.update(review_status='reconciled', acceptance_verdict=trial.get('verdict'),
             target_vins=trial.get('target_vins'), target_reached=trial.get('target_reached'),
@@ -123,7 +129,7 @@ def load_trial_review(selections, *, as_of):
             gaps_below_three_seconds=timing.get('gaps_below_three_seconds',
                                               timing.get('observed_gaps_below_three_seconds')),
             stop_reason=trial.get('actual_stop_reason'))
-        if row['stop_reason'] is None and trial.get('verdict') == 'PASS' and counts.get('planned_queries') is not None and counts.get('complete_queries') == counts['planned_queries']:
+        if row['stop_reason'] is None and trial.get('verdict') == 'PASS' and complete_plan:
             row['stop_reason'] = 'Declared query plan complete'
         trial_rows.append(row)
         for checkpoint in trial.get('checkpoints', []):
