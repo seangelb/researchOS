@@ -1,6 +1,6 @@
 # researchOS: official state gaming revenue
 
-**September 12 integration:** paths in this guide are relative to `gaming/`. The retained databases/raw archive are missing locally; see [data recovery](docs/data_recovery.md). Existing study outputs are historical and have not been recalculated. Use the root [launch and validation commands](../README.md).
+**September 12 refresh:** paths in this guide are relative to `gaming/`. A new current database and source archive have been collected; start with notebook 94 and the [refresh record](docs/data_rebuild_20260912.md). The exact earlier approved snapshots remain missing; see [data recovery](docs/data_recovery.md). Use the root [launch and validation commands](../README.md).
 
 
 Small Python modules collect official online sports-betting and online-casino reports.
@@ -8,6 +8,9 @@ Use pandas in Jupyter to inspect the results. No service or separate application
 
 ## Open these notebooks
 
+- **`notebooks/94_flut_current_data.ipynb` — start here.** Read the validated September
+  12 capture, source coverage and exceptions, latest native FanDuel rows, and New York
+  weekly handle share reconciled to official totals. This is current evidence for review.
 - **`notebooks/90_consolidated_ggr.ipynb` — daily analysis.** Change states, product,
   metric, dates, and frequency, then Restart Kernel and Run All. It reads SQLite
   without downloading or writing. Optional CSV export is disabled by default.
@@ -26,6 +29,10 @@ Use pandas in Jupyter to inspect the results. No service or separate application
 - **`notebooks/31_massachusetts_pdf_walkthrough.ipynb` — learn one parser.**
   Inspect a saved PDF, call the module parser, and reconcile to the printed total.
   Runs offline and writes nothing.
+
+Studies 91–93 remain blocked on their missing historical databases. Their saved
+outputs are historical; notebook 94 is the new current-data view. No approval hash
+was changed to bind an old study to newly downloaded evidence.
 
 Notebooks 00, 10, 11, and 30 are optional offline source examples. Notebooks 00,
 10, and 11 explicitly select staging and inspect it read-only. Notebook 10 fetches
@@ -97,7 +104,7 @@ the inventory research, not the publication date or historical availability of a
 
 ## Nationwide coverage and staging
 
-Open [the coverage report](docs/nationwide_coverage.md) for every state/product,
+Open notebook 94 for current capture coverage. The older [coverage report](docs/nationwide_coverage.md) describes every state/product,
 observed ranges, missing periods, and exact reasons for gaps. The inventory has 102
 rows (50 states plus DC, two products). It is a coverage map, not a claim of 102
 collected series or complete national GGR. Collection logs are in `data/staging/`.
@@ -105,8 +112,8 @@ collected series or complete national GGR. Collection logs are in `data/staging/
 In notebooks 00, 10, 11, 20, and 90, select one database with:
 
 ```python
-database_file = "data/staging/gaming_nationwide.sqlite"  # new data and corrected replays
-# database_file = "data/gaming.sqlite"                  # preserved original data
+database_file = "data/staging/rebuild_20260912T191234Z/gaming_current.sqlite"  # validated September 12 capture
+# The earlier original/study databases remain missing; their hashes are in docs/data_recovery.md.
 ```
 
 Notebooks 00, 10, 11, and 90 open the selected database read-only. Notebook 20 defaults to staging;
@@ -115,7 +122,12 @@ enable both `run_downloads` and `allow_database_writes`. The staging database is
 To create another staging copy, use SQLite's backup API with a read-only source;
 do not overwrite an existing staging file that contains work.
 
-Staging corrections matter for analysis:
+For the next collection, choose a new dated database destination in notebook 20.
+Keep this validated capture immutable and back up the new database, raw files,
+configuration, and collection/validation logs together before using its results.
+
+The earlier staging corrections below describe the historical study. Use the new
+capture's coverage table for current dates and exceptions. Parser definitions still matter:
 
 - Connecticut's label **Total Gross Gaming Revenue** is its post-deduction base.
   Printed **Win/(Loss)** is now `gross_revenue`; sports revenue after excise is

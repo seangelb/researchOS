@@ -31,12 +31,16 @@ source references resolve within their own project, not relative to the Git root
 
 ## Current data availability
 
-The September 12 integration recovered the gaming code, notebooks, parser repairs,
-and tests. Its historical original, staging, and approved-candidate databases and
-raw report archive were not found locally. The retained financial studies remain
-blocked until their exact data is restored. See [recovery status](gaming/docs/data_recovery.md).
-The Pennsylvania and Colorado walkthroughs retain their separate reviewed sample
-reports; those samples do not replace the missing full archive.
+The September 12 refresh rebuilt a current gaming database from the existing official
+source collectors. Start with [FLUT current data](gaming/notebooks/94_flut_current_data.ipynb)
+for coverage, latest FanDuel observations, and reconciled New York weekly activity.
+Notebook 90 explores the same fresh dataset. See the [refresh record](gaming/docs/data_rebuild_20260912.md)
+for validation, reporting gaps, and the separate data backup.
+
+The exact historical original, staging, and approved-candidate databases remain
+missing. Studies 91–93 retain their original gates and historical outputs; fresh
+downloads do not recreate those approved snapshots. See [recovery status](gaming/docs/data_recovery.md).
+The Pennsylvania and Colorado walkthroughs retain their reviewed sample reports.
 
 Vehicle evidence remains in `vehicle/data/`. Neither branch merging nor installation
 runs collectors, refreshes data, changes approved snapshots, or promotes a valuation.

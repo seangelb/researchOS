@@ -1,5 +1,15 @@
 # Retained gaming data recovery
 
+The user authorized a fresh collection on September 12, 2026. The current dataset is
+`data/staging/rebuild_20260912T191234Z/gaming_current.sqlite`; notebook 94 reads it
+after validating its database hash. Notebook 90 now explores that same capture.
+See [the rebuild record](data_rebuild_20260912.md) for counts, verification, coverage
+limitations, and the separate ZIP backup containing database and source bytes.
+
+This recovers a usable current research dataset. It does not recreate any of the
+exact historical snapshots below or their point-in-time availability. Notebooks
+91–93 retain their original approval gates and historical outputs.
+
 Code and fixtures were restored on September 12, 2026. The original data archive
 was not found in the inspected researchOS, Documents, or Codex storage locations.
 Saved notebook output and old manifests are historical evidence, not a usable database.

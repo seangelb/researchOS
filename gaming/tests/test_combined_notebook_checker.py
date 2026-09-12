@@ -54,13 +54,13 @@ def test_existing_sqlite_stays_readonly(tmp_path):
 
 
 def test_all_projects_reports_missing_data_and_exits_nonzero(tmp_path, monkeypatch, capsys):
-    for prefix in ("00", "10", "11", "20", "30", "31", "90", "91", "92", "93"):
+    for prefix in ("00", "10", "11", "20", "30", "31", "90", "91", "92", "93", "94"):
         write_notebook(tmp_path / f"gaming/notebooks/{prefix}_test.ipynb", "assert 1 + 1 == 2")
     write_notebook(tmp_path / "vehicle/notebooks/test.ipynb", "from pathlib import Path; Path('data/missing.csv').read_bytes()")
     monkeypatch.setattr("sys.argv", [str(REPOSITORY / "scripts/check_notebooks.py"), "--root", str(tmp_path), "--project", "all"])
     assert checker.main() == 1
     results = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
-    assert len(results) == 11
-    assert sum(r["status"] == "PASS" and r["project"] == "gaming" for r in results) == 10
+    assert len(results) == 12
+    assert sum(r["status"] == "PASS" and r["project"] == "gaming" for r in results) == 11
     assert results[-1]["project"] == "vehicle"
     assert results[-1]["status"] == "BLOCKED"
