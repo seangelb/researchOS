@@ -32,13 +32,13 @@ source references resolve within their own project, not relative to the Git root
 ## Current data availability
 
 Gaming uses three steps: [20 — capture official reports](gaming/notebooks/20_run_all_collectors.ipynb),
-[94 — read the industry update](gaming/notebooks/94_gaming_industry_update.ipynb), and
+[94 — read the monthly fundamentals review](gaming/notebooks/94_gaming_industry_update.ipynb), and
 [90 — investigate sources](gaming/notebooks/90_consolidated_ggr.ipynb). The selected
 September 12 capture has **19,806 observations across 34 state/product series**;
 the comparable MA/MI monthly panel and separate NY weekly panel have narrower
 coverage. The [industry guide](gaming/docs/industry_workflow.md) explains the
-single snapshot setting, legal-event watchlist and optional dated note export.
-Read the [September 12 example](gaming/docs/industry_update_20260912.md) for the
+single snapshot setting, 12-month/rolling-three-month comparisons, legal-event watchlist and optional dated note export.
+Read the [September 12 monthly review](gaming/docs/monthly_fundamentals_20260912.md) for the
 business conclusions and limitations. FLUT expectations notebooks 95/96 remain
 optional historical experiments.
 

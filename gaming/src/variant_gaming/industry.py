@@ -9,7 +9,7 @@ import re
 import pandas as pd
 
 from variant_gaming.flut_scorecard import (
-    CONTRACTS, SPORTS, CASINO, _month_values, _refs, _share,
+    CONTRACTS, SPORTS, CASINO, MONTHLY_COLUMNS, _month_values, _refs, _share,
     build_monthly_scorecard, build_quarterly_scorecard, sportsbook_hold,
 )
 
@@ -18,14 +18,86 @@ NATIVE_OPERATORS = {
              ("MI", CASINO): "FanDuel (MotorCity Casino)"},
     "DKNG": {("MA", SPORTS): "DraftKings", ("MI", SPORTS): "DraftKings (Bay Mills Indian Community)",
              ("MI", CASINO): "DraftKings (Bay Mills Indian Community)"},
-    "CZR": {("MA", SPORTS): "Caesars Sportsbook"},
+    "CZR": {("MA", SPORTS): "Caesars Sportsbook",
+            ("MI", SPORTS): "Grand Traverse license: source labels shown per month",
+            ("MI", CASINO): "Grand Traverse plus Sault licenses: source labels shown per month"},
 }
 NY_OPERATORS = {"FLUT": "FanDuel", "DKNG": "DraftKings Sport Book", "CZR": "Caesars Sport Book"}
 SCOPE_NOTES = {
     "FLUT": "Native FanDuel evidence in these US states; excludes Flutter International and other US activity.",
     "DKNG": "Native DraftKings brand/license evidence; Golden Nugget and other company activity are not aggregated.",
-    "CZR": "MA/NY Caesars sportsbook evidence only; no land-based group inference. MI license aggregation is unreviewed.",
+    "CZR": "Covered MA/NY sportsbook and MI licensed digital operations only; no land-based group inference. MI sportsbook uses Grand Traverse from May 2021; casino adds Sault from July 2024.",
 }
+
+# Primary evidence for the bounded license/ownership mapping; checked by notebook 94.
+CZR_MAPPING_SOURCES = [{'source_id': 'czr_william_hill_acquisition',
+  'source_url': 'https://investor.caesars.com/news-releases/news-release-details/caesars-entertainment-announces-completion-william-hill-plc',
+  'source_file': 'data/raw/GAMING_CONTEXT/2026-09-12/czr_william_hill_acquisition_ce1d951916c80522.html',
+  'source_sha256': 'ce1d951916c805226df0c78da9fec81230adfc2fa4ec75510259e9a6fb2cbf3f',
+  'captured_at': '2026-09-12T22:33:31.501217+00:00'},
+ {'source_id': 'czr_wsop_license',
+  'source_url': 'https://s202.q4cdn.com/508919455/files/doc_news/Caesars-Entertainment-Closes-Sale-of-World-Series-of-Poker-Brand-to-NSUS-Group-for-US500-million-2024.pdf',
+  'source_file': 'data/raw/GAMING_CONTEXT/2026-09-12/czr_wsop_license_cea990d7d3b230c2.pdf',
+  'source_sha256': 'cea990d7d3b230c27a85eea05bccfc6916afd4ccf4d3916c94bb1acfaea13ad7',
+  'captured_at': '2026-09-12T22:33:31.245116+00:00'},
+ {'source_id': 'mi_authorized_providers',
+  'source_url': 'https://www.michigan.gov/mgcb/internet-gaming-and-fantasy-contests/authorized-online-gaming-and-sports-betting-platform-providers-in-michigan',
+  'source_file': 'data/raw/GAMING_CONTEXT/2026-09-12/mi_authorized_providers_13f00f52b68d8775.html',
+  'source_sha256': '13f00f52b68d8775b708034890a6ae4e3d682d49f30886ee106bc1e914b3e8e2',
+  'captured_at': '2026-09-12T22:34:10.918979+00:00'},
+ {'source_id': 'czr_wynn_acquisition',
+  'source_url': 'https://newsroom.caesars.com/press-releases/press-release-details/2024/Caesars-Entertainment-Inc.-Completes-Previously-Announced-Acquisition-of-Michigan-iGaming-Operations-from-Wynn-Resorts/default.aspx',
+  'source_file': 'data/raw/GAMING_CONTEXT/2026-09-12/czr_wynn_acquisition_5c6fda9ce84f7684.html',
+  'source_sha256': '5c6fda9ce84f768497253f10794654f394757ee6e4bd70ad5ec3c0b8ac8ba782',
+  'captured_at': '2026-09-12T22:34:10.997380+00:00'},
+ {'source_id': 'czr_horseshoe_launch',
+  'source_url': 'https://newsroom.caesars.com/press-releases/press-release-details/2024/Caesars-Entertainment-Launches-its-Newest-Proprietary-iGaming-Platform-Horseshoe-Online-Casino/default.aspx',
+  'source_file': 'data/raw/GAMING_CONTEXT/2026-09-12/czr_horseshoe_launch_e03c5b0071b0f25f.html',
+  'source_sha256': 'e03c5b0071b0f25fcb4cf0534618523c674d4809c27f452c4da286d087f030c3',
+  'captured_at': '2026-09-12T22:34:11.004408+00:00'}]
+
+CZR_GRAND_TRAVERSE = ("William Hill (Grand Traverse Band of Ottawa and Chippewa Indians)",
+                     "Caesars/WSOP (Grand Traverse Band of Ottawa and Chippewa Indians)")
+CZR_SAULT_CASINO = ("Wynn (Sault Ste. Marie Tribe of Chippewa Indians)",
+                   "Caesars Horseshoe (Sault Ste. Marie Tribe of Chippewa Indians)")
+
+
+def caesars_michigan_monthly(observations):
+    """Two specifically reviewed licenses, bounded by first full ownership months.
+
+    The notebook verifies CZR_MAPPING_SOURCES before use. Exactly one source alias
+    per required license/month is allowed; no Sault sportsbook is attributed.
+    Original native labels and all report references remain in the output.
+    """
+    output = []
+    for vertical, since in [(SPORTS, "2021-05"), (CASINO, "2024-07")]:
+        contract = CONTRACTS["MI", vertical]
+        selected = observations[observations.state_code.eq("MI") & observations.vertical.eq(vertical)
+                                & observations.channel.eq("online") & observations.frequency.eq("monthly")]
+        aliases = [CZR_GRAND_TRAVERSE] + ([CZR_SAULT_CASINO] if vertical == CASINO else [])
+        for (start, end), group in selected.groupby(["period_start", "period_end"], dropna=False):
+            native = [sorted(set(group.loc[group.row_type.eq("operator") & group.operator.isin(names), "operator"])) for names in aliases]
+            for metric, label in contract["metrics"].items():
+                item = dict(state_code="MI", vertical=vertical, metric=metric, native_metric=label,
+                            period_start=start, period_end=end, fd_operator=" | ".join(name for names in native for name in names),
+                            status="eligible", reason="", source_refs=_refs(group))
+                try:
+                    month = pd.Period(start, freq="M")
+                    if start != str(month.start_time.date()) or end != str(month.end_time.date()):
+                        raise ValueError("not_one_complete_calendar_month")
+                    if str(month) < since:
+                        raise ValueError("before_reviewed_full_ownership_month")
+                    if any(len(names) != 1 for names in native):
+                        raise ValueError("missing_or_multiple_aliases_for_caesars_license")
+                    values = [_month_values(group, dict(contract, operator=names[0]), metric) for names in native]
+                    amount, market, total = sum(v[0] for v in values), values[0][1], values[0][2]
+                    share, share_status = _share(amount, market, handle=metric == "handle")
+                    item.update(fd_amount=amount, market_amount=market, operator_sum=total,
+                                reconciliation_difference=total-market, fd_share_pct=share, share_status=share_status)
+                except (ValueError, TypeError) as exc:
+                    item.update(status="excluded", reason=str(exc), share_status="excluded")
+                output.append(item)
+    return pd.DataFrame(output, columns=MONTHLY_COLUMNS)
 
 
 def _company_columns(frame):
@@ -103,7 +175,10 @@ def build_industry_tables(observations, *, quarter, through_month, ny_weeks=8):
         raise ValueError("Use an explicit YYYYQn quarter and YYYY-MM through_month")
     monthly, quarterly, holds = [], [], []
     for company, operators in NATIVE_OPERATORS.items():
-        m = build_monthly_scorecard(observations, operators=operators)
+        direct = {key: value for key, value in operators.items() if not (company == "CZR" and key[0] == "MI")}
+        m = build_monthly_scorecard(observations, operators=direct)
+        if company == "CZR":
+            m = pd.concat([m, caesars_michigan_monthly(observations)], ignore_index=True)
         q = build_quarterly_scorecard(m, quarter=quarter, through_month=through_month)
         q["mapping_status"] = ["native_brand_only" if (row.state_code, row.vertical) in operators else "unmapped"
                                for row in q.itertuples()]
@@ -189,8 +264,15 @@ def research_note(update, *, quarter, through_month, capture_at, database_sha256
     lines = [f"# Gambling industry research — {quarter} through {through_month}", "",
              f"Operating-data capture: {capture_at}.",
              "Current retained evidence; capture time does not reconstruct historical public availability.", ""]
+    if "supporting_evidence" in update:
+        lines[0] = f"# Monthly gambling fundamentals — through {through_month}"
+        lines.extend([f"Twelve monthly reads: {pd.Period(through_month, freq='M')-11} through {through_month}. Latest 3M: {update.window.iloc[0]}.",
+                      "Prior-read changes use the same capture. Acceleration compares latest 3M YoY with preceding non-overlapping 3M YoY; no composite rating is calculated.", ""])
     for row in update.itertuples():
-        lines.extend([f"## {row.subject}", f"**What changed:** {row.what_changed}",
+        lines.append(f"## {row.subject}")
+        if hasattr(row, "supporting_evidence"):
+            lines.extend([f"**Supporting evidence:** {row.supporting_evidence}", f"**Contrary evidence:** {row.contrary_evidence}"])
+        lines.extend([f"**What changed:** {row.what_changed}",
                       f"**Interpretation:** {row.interpretation}", f"**Uncertainty:** {row.uncertainty}",
                       f"**Next check:** {row.next_check}", ""])
     if legal_events is not None:

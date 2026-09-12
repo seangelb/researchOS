@@ -63,8 +63,8 @@ def test_michigan_native_labels_do_not_fuzzily_aggregate_golden_nugget_or_caesar
     result = tables(rows)
     dk = result["casino"].query("company == 'DKNG' and metric == 'gross_revenue'").iloc[0]
     assert dk.company_amount == 3 and dk.prior_company_amount == 4
-    assert result["casino"].query("company == 'CZR'").status.eq("unmapped_company_scope").all()
-    assert operator_scope().query("company == 'CZR' and state_code == 'MI'").native_operator.isna().all()
+    assert result["casino"].query("company == 'CZR'").status.eq("incomplete_comparison").all()
+    assert result["monthly"].query("company == 'CZR' and state_code == 'MI'").reason.eq("missing_or_multiple_aliases_for_caesars_license").all()
 
 
 def test_missing_august_blocks_requested_window_and_business_prose_explains_it():

@@ -1,0 +1,101 @@
+{
+  "reviewed_on": "2026-09-12",
+  "sources": [
+    {
+      "source_id": "flutter_q2_2026",
+      "source_file": "data/raw/FLUT/2026-09-12/d86526afd29f043ab4fade29b9528bfade051deb7ab49ce38792e43389ff4678.pdf",
+      "source_url": "https://flutter.com/media/g23an0ae/flutter-q2-2026-earnings-release.pdf",
+      "source_sha256": "d86526afd29f043ab4fade29b9528bfade051deb7ab49ce38792e43389ff4678",
+      "published_on": "2026-08-05",
+      "captured_at": "2026-09-12T20:09:25.695951+00:00"
+    },
+    {
+      "source_id": "czr_william_hill_acquisition",
+      "source_url": "https://investor.caesars.com/news-releases/news-release-details/caesars-entertainment-announces-completion-william-hill-plc",
+      "final_url": "https://investor.caesars.com/news-releases/news-release-details/caesars-entertainment-announces-completion-william-hill-plc",
+      "source_file": "data/raw/GAMING_CONTEXT/2026-09-12/czr_william_hill_acquisition_ce1d951916c80522.html",
+      "source_sha256": "ce1d951916c805226df0c78da9fec81230adfc2fa4ec75510259e9a6fb2cbf3f",
+      "captured_at": "2026-09-12T22:33:31.501217+00:00",
+      "published_on": "2021-04-22",
+      "byte_length": 517323
+    },
+    {
+      "source_id": "czr_wsop_license",
+      "source_url": "https://s202.q4cdn.com/508919455/files/doc_news/Caesars-Entertainment-Closes-Sale-of-World-Series-of-Poker-Brand-to-NSUS-Group-for-US500-million-2024.pdf",
+      "final_url": "https://s202.q4cdn.com/508919455/files/doc_news/Caesars-Entertainment-Closes-Sale-of-World-Series-of-Poker-Brand-to-NSUS-Group-for-US500-million-2024.pdf",
+      "source_file": "data/raw/GAMING_CONTEXT/2026-09-12/czr_wsop_license_cea990d7d3b230c2.pdf",
+      "source_sha256": "cea990d7d3b230c27a85eea05bccfc6916afd4ccf4d3916c94bb1acfaea13ad7",
+      "captured_at": "2026-09-12T22:33:31.245116+00:00",
+      "published_on": "2024-10-29",
+      "byte_length": 495501
+    },
+    {
+      "source_id": "dkng_q2_2026",
+      "source_url": "https://ir.aboutdraftkings.com/news/news-details/2026/DraftKings-Reports-Second-Quarter-Results/default.aspx",
+      "final_url": "https://ir.aboutdraftkings.com/news/news-details/2026/DraftKings-Reports-Second-Quarter-Results/default.aspx",
+      "source_file": "data/raw/GAMING_CONTEXT/2026-09-12/dkng_q2_2026_7720f786a41eef93.html",
+      "source_sha256": "7720f786a41eef933c3cc0a4e6273bf896f1baec3f0d8f893e124ef0d1cca66e",
+      "captured_at": "2026-09-12T22:34:10.975101+00:00",
+      "published_on": "2026-08-06",
+      "byte_length": 340285
+    },
+    {
+      "source_id": "czr_q2_2026",
+      "source_url": "https://newsroom.caesars.com/press-releases/press-release-details/2026/Caesars-Entertainment-Inc--Reports-Second-Quarter-2026-Results/default.aspx",
+      "final_url": "https://newsroom.caesars.com/press-releases/press-release-details/2026/Caesars-Entertainment-Inc--Reports-Second-Quarter-2026-Results/default.aspx",
+      "source_file": "data/raw/GAMING_CONTEXT/2026-09-12/czr_q2_2026_c0d19a2e9267d16f.html",
+      "source_sha256": "c0d19a2e9267d16f474f907a89efddeb49b1fa67478a6927ae5b582ba2d00371",
+      "captured_at": "2026-09-12T22:34:11.013695+00:00",
+      "published_on": "2026-07-28",
+      "byte_length": 538576
+    },
+    {
+      "source_id": "mi_authorized_providers",
+      "source_url": "https://www.michigan.gov/mgcb/internet-gaming-and-fantasy-contests/authorized-online-gaming-and-sports-betting-platform-providers-in-michigan",
+      "final_url": "https://www.michigan.gov/mgcb/internet-gaming-and-fantasy-contests/authorized-online-gaming-and-sports-betting-platform-providers-in-michigan",
+      "source_file": "data/raw/GAMING_CONTEXT/2026-09-12/mi_authorized_providers_13f00f52b68d8775.html",
+      "source_sha256": "13f00f52b68d8775b708034890a6ae4e3d682d49f30886ee106bc1e914b3e8e2",
+      "captured_at": "2026-09-12T22:34:10.918979+00:00",
+      "published_on": null,
+      "byte_length": 156608
+    },
+    {
+      "source_id": "czr_wynn_acquisition",
+      "source_url": "https://newsroom.caesars.com/press-releases/press-release-details/2024/Caesars-Entertainment-Inc.-Completes-Previously-Announced-Acquisition-of-Michigan-iGaming-Operations-from-Wynn-Resorts/default.aspx",
+      "final_url": "https://newsroom.caesars.com/press-releases/press-release-details/2024/Caesars-Entertainment-Inc.-Completes-Previously-Announced-Acquisition-of-Michigan-iGaming-Operations-from-Wynn-Resorts/default.aspx",
+      "source_file": "data/raw/GAMING_CONTEXT/2026-09-12/czr_wynn_acquisition_5c6fda9ce84f7684.html",
+      "source_sha256": "5c6fda9ce84f768497253f10794654f394757ee6e4bd70ad5ec3c0b8ac8ba782",
+      "captured_at": "2026-09-12T22:34:10.997380+00:00",
+      "published_on": "2024-06-18",
+      "byte_length": 365070
+    },
+    {
+      "source_id": "czr_horseshoe_launch",
+      "source_url": "https://newsroom.caesars.com/press-releases/press-release-details/2024/Caesars-Entertainment-Launches-its-Newest-Proprietary-iGaming-Platform-Horseshoe-Online-Casino/default.aspx",
+      "final_url": "https://newsroom.caesars.com/press-releases/press-release-details/2024/Caesars-Entertainment-Launches-its-Newest-Proprietary-iGaming-Platform-Horseshoe-Online-Casino/default.aspx",
+      "source_file": "data/raw/GAMING_CONTEXT/2026-09-12/czr_horseshoe_launch_e03c5b0071b0f25f.html",
+      "source_sha256": "e03c5b0071b0f25fcb4cf0534618523c674d4809c27f452c4da286d087f030c3",
+      "captured_at": "2026-09-12T22:34:11.004408+00:00",
+      "published_on": "2024-10-07",
+      "byte_length": 383393
+    },
+    {
+      "source_id": "nj_july2026_tax_statistics",
+      "published_on": null,
+      "source_url": "https://www.nj.gov/oag/ge/docs/Financials/PressRelease2026/July2026.pdf",
+      "source_file": "data/raw/GAMING_CONTEXT/2026-09-12/nj_july2026_tax_statistics_40eb24be15d4a030.pdf",
+      "source_sha256": "40eb24be15d4a030924c08e498efdcf63707a768900d8209a007ee557b8521a2",
+      "captured_at": "2026-09-12T22:35:54.857318+00:00",
+      "byte_length": 438552
+    },
+    {
+      "source_id": "il_per_wager_tax_faq",
+      "published_on": "2025-06-17",
+      "source_url": "https://igb.illinois.gov/content/dam/soi/en/web/igb/documents/press-releases/additional-news/20250617-faqs-on-new-statutory-sports-wager-tax.pdf",
+      "source_file": "data/raw/GAMING_CONTEXT/2026-09-12/il_per_wager_tax_faq_400f83c7de2fc0fd.pdf",
+      "source_sha256": "400f83c7de2fc0fd93fd3d44d24cfd8b46b908ee6ddb177ce6dad6d2d9422ada",
+      "captured_at": "2026-09-12T22:35:54.381291+00:00",
+      "byte_length": 270682
+    }
+  ]
+}

@@ -1,0 +1,168 @@
+{
+  "end_month": "2026-07",
+  "database_sha256": "751e135c083f66d025ca4d03116021215ac136518ba24b2093f135af044df3ee",
+  "calculation": "Explicit complete calendar months, ratios of sums, same-month prior year; source gaps preserved",
+  "operating_sources": [
+    {
+      "source_url": "https://massgaming.com/wp-content/uploads/MGC-June-2024-Revenue-Report.pdf",
+      "source_file": "data/raw/MA/2026-09-12/50a42eabbe494b0c693f8918f98b04c95137acdfa75df25eeabbff83fbef2682_MGC-June-2024-Revenue-Report.pdf",
+      "source_sha256": "50a42eabbe494b0c693f8918f98b04c95137acdfa75df25eeabbff83fbef2682"
+    },
+    {
+      "source_url": "https://massgaming.com/wp-content/uploads/MGC-October-2024-Revenue-Report.pdf",
+      "source_file": "data/raw/MA/2026-09-12/1d7971dead9e8ab5b228bbf67e6fcbea1326e43906ea97a418b67f146c44f44b_MGC-October-2024-Revenue-Report.pdf",
+      "source_sha256": "1d7971dead9e8ab5b228bbf67e6fcbea1326e43906ea97a418b67f146c44f44b"
+    },
+    {
+      "source_url": "https://massgaming.com/wp-content/uploads/MGC-Revenue-Report-April-2025.pdf",
+      "source_file": "data/raw/MA/2026-09-12/6254c3063b5fd240c56a4a3b471333f6126a1f548d598a60fc5bcdd5064cdada_MGC-Revenue-Report-April-2025.pdf",
+      "source_sha256": "6254c3063b5fd240c56a4a3b471333f6126a1f548d598a60fc5bcdd5064cdada"
+    },
+    {
+      "source_url": "https://massgaming.com/wp-content/uploads/MGC-Revenue-Report-April-2026.pdf",
+      "source_file": "data/raw/MA/2026-09-12/877b5e94c0d2240561b24dc41579e5f2617cad9f0d9428f8161ef99d92bd1d5c_MGC-Revenue-Report-April-2026.pdf",
+      "source_sha256": "877b5e94c0d2240561b24dc41579e5f2617cad9f0d9428f8161ef99d92bd1d5c"
+    },
+    {
+      "source_url": "https://massgaming.com/wp-content/uploads/MGC-Revenue-Report-August-2024.pdf",
+      "source_file": "data/raw/MA/2026-09-12/875ed77e7574216f712e8f1ad17d6c3f23136b9e392f532a0bdfd586e0c6c498_MGC-Revenue-Report-August-2024.pdf",
+      "source_sha256": "875ed77e7574216f712e8f1ad17d6c3f23136b9e392f532a0bdfd586e0c6c498"
+    },
+    {
+      "source_url": "https://massgaming.com/wp-content/uploads/MGC-Revenue-Report-August-2025.pdf",
+      "source_file": "data/raw/MA/2026-09-12/93ad9751b74bbb44fc49a411b2e75dfaf9e1aaaec956a27bc74e42f2944c3d9c_MGC-Revenue-Report-August-2025.pdf",
+      "source_sha256": "93ad9751b74bbb44fc49a411b2e75dfaf9e1aaaec956a27bc74e42f2944c3d9c"
+    },
+    {
+      "source_url": "https://massgaming.com/wp-content/uploads/MGC-Revenue-Report-December-2024.pdf",
+      "source_file": "data/raw/MA/2026-09-12/d0a62c740f06483631abdaf1a14c471d981233ac64e42c2bf3fbb943cda7b938_MGC-Revenue-Report-December-2024.pdf",
+      "source_sha256": "d0a62c740f06483631abdaf1a14c471d981233ac64e42c2bf3fbb943cda7b938"
+    },
+    {
+      "source_url": "https://massgaming.com/wp-content/uploads/MGC-Revenue-Report-December-2025.pdf",
+      "source_file": "data/raw/MA/2026-09-12/f8de2d3fe83a4d5acb412bf904e0a40814ed22af9364542447c529ba5e899fd4_MGC-Revenue-Report-December-2025.pdf",
+      "source_sha256": "f8de2d3fe83a4d5acb412bf904e0a40814ed22af9364542447c529ba5e899fd4"
+    },
+    {
+      "source_url": "https://massgaming.com/wp-content/uploads/MGC-Revenue-Report-February-2025.pdf",
+      "source_file": "data/raw/MA/2026-09-12/f0c820052f040ce5edbcf830f238145e80263262e2643b68e21fdb05380383a5_MGC-Revenue-Report-February-2025.pdf",
+      "source_sha256": "f0c820052f040ce5edbcf830f238145e80263262e2643b68e21fdb05380383a5"
+    },
+    {
+      "source_url": "https://massgaming.com/wp-content/uploads/MGC-Revenue-Report-February-2026.pdf",
+      "source_file": "data/raw/MA/2026-09-12/9c42d82664073e7de41db9170386ad8a2094c949f4d69bcf8233607324d791ba_MGC-Revenue-Report-February-2026.pdf",
+      "source_sha256": "9c42d82664073e7de41db9170386ad8a2094c949f4d69bcf8233607324d791ba"
+    },
+    {
+      "source_url": "https://massgaming.com/wp-content/uploads/MGC-Revenue-Report-January-2025.pdf",
+      "source_file": "data/raw/MA/2026-09-12/dbf48a7935d3664a8aa23cb052b4b3743e9b72ac11da60f2038b0e4a3ed9e196_MGC-Revenue-Report-January-2025.pdf",
+      "source_sha256": "dbf48a7935d3664a8aa23cb052b4b3743e9b72ac11da60f2038b0e4a3ed9e196"
+    },
+    {
+      "source_url": "https://massgaming.com/wp-content/uploads/MGC-Revenue-Report-January-2026.pdf",
+      "source_file": "data/raw/MA/2026-09-12/f79abaa5becc563ed7459162b653355048c6e30ab4f2a3542e878f3f969d66ff_MGC-Revenue-Report-January-2026.pdf",
+      "source_sha256": "f79abaa5becc563ed7459162b653355048c6e30ab4f2a3542e878f3f969d66ff"
+    },
+    {
+      "source_url": "https://massgaming.com/wp-content/uploads/MGC-Revenue-Report-July-2024.pdf",
+      "source_file": "data/raw/MA/2026-09-12/274bf861ce6f1c85607efae3460ea9a74cc08f08196742d3df9aa524e17f8058_MGC-Revenue-Report-July-2024.pdf",
+      "source_sha256": "274bf861ce6f1c85607efae3460ea9a74cc08f08196742d3df9aa524e17f8058"
+    },
+    {
+      "source_url": "https://massgaming.com/wp-content/uploads/MGC-Revenue-Report-July-2025.pdf",
+      "source_file": "data/raw/MA/2026-09-12/8d365d618538cc847b0bda6c45d749917c37bf1a12b95bc7ca17f441dae379fa_MGC-Revenue-Report-July-2025.pdf",
+      "source_sha256": "8d365d618538cc847b0bda6c45d749917c37bf1a12b95bc7ca17f441dae379fa"
+    },
+    {
+      "source_url": "https://massgaming.com/wp-content/uploads/MGC-Revenue-Report-July-2026.pdf",
+      "source_file": "data/raw/MA/2026-09-12/ccac154845a1a2e63dac0a33a9d725edf6eeaa2f2037365c9175596c92891517_MGC-Revenue-Report-July-2026.pdf",
+      "source_sha256": "ccac154845a1a2e63dac0a33a9d725edf6eeaa2f2037365c9175596c92891517"
+    },
+    {
+      "source_url": "https://massgaming.com/wp-content/uploads/MGC-Revenue-Report-June-2025.pdf",
+      "source_file": "data/raw/MA/2026-09-12/e39e3878cf0af5cbfa9140679dd66f3915d6ed0a6028e05f8c0223795cf3693a_MGC-Revenue-Report-June-2025.pdf",
+      "source_sha256": "e39e3878cf0af5cbfa9140679dd66f3915d6ed0a6028e05f8c0223795cf3693a"
+    },
+    {
+      "source_url": "https://massgaming.com/wp-content/uploads/MGC-Revenue-Report-June-2026.pdf",
+      "source_file": "data/raw/MA/2026-09-12/6d2e3ac63934f1d6169a8861749b85749250873d98e8c628283e788415ea575a_MGC-Revenue-Report-June-2026.pdf",
+      "source_sha256": "6d2e3ac63934f1d6169a8861749b85749250873d98e8c628283e788415ea575a"
+    },
+    {
+      "source_url": "https://massgaming.com/wp-content/uploads/MGC-Revenue-Report-March-2025.pdf",
+      "source_file": "data/raw/MA/2026-09-12/bf9c0bc5f97e03620b352b073d43e0c88f90286bb8fecc95a62ce1f868e11d3a_MGC-Revenue-Report-March-2025.pdf",
+      "source_sha256": "bf9c0bc5f97e03620b352b073d43e0c88f90286bb8fecc95a62ce1f868e11d3a"
+    },
+    {
+      "source_url": "https://massgaming.com/wp-content/uploads/MGC-Revenue-Report-March-2026.pdf",
+      "source_file": "data/raw/MA/2026-09-12/b363f98a625620f672f81967942b966fa7930244b2474e5a39173b6c7525d74c_MGC-Revenue-Report-March-2026.pdf",
+      "source_sha256": "b363f98a625620f672f81967942b966fa7930244b2474e5a39173b6c7525d74c"
+    },
+    {
+      "source_url": "https://massgaming.com/wp-content/uploads/MGC-Revenue-Report-May-2025.pdf",
+      "source_file": "data/raw/MA/2026-09-12/c171671d461b93516ff2a50341cd221ffe692c4ddf8c58c628ceb2f95f3a4abd_MGC-Revenue-Report-May-2025.pdf",
+      "source_sha256": "c171671d461b93516ff2a50341cd221ffe692c4ddf8c58c628ceb2f95f3a4abd"
+    },
+    {
+      "source_url": "https://massgaming.com/wp-content/uploads/MGC-Revenue-Report-May-2026.pdf",
+      "source_file": "data/raw/MA/2026-09-12/a6f57e1571017921d1a11fa6987fbcd98c774bc556eafcb127bbe9951538c96a_MGC-Revenue-Report-May-2026.pdf",
+      "source_sha256": "a6f57e1571017921d1a11fa6987fbcd98c774bc556eafcb127bbe9951538c96a"
+    },
+    {
+      "source_url": "https://massgaming.com/wp-content/uploads/MGC-Revenue-Report-November-2024.pdf",
+      "source_file": "data/raw/MA/2026-09-12/0bc7b883d90c9439b1ab6641c43f2dd015d95b29e7f40fded0102664942b4bb3_MGC-Revenue-Report-November-2024.pdf",
+      "source_sha256": "0bc7b883d90c9439b1ab6641c43f2dd015d95b29e7f40fded0102664942b4bb3"
+    },
+    {
+      "source_url": "https://massgaming.com/wp-content/uploads/MGC-Revenue-Report-November-2025.pdf",
+      "source_file": "data/raw/MA/2026-09-12/d8c284a3a46d9124b8f52b369d6aaa97c4ca6e11d89f8d86e5a6bf1de894a4b2_MGC-Revenue-Report-November-2025.pdf",
+      "source_sha256": "d8c284a3a46d9124b8f52b369d6aaa97c4ca6e11d89f8d86e5a6bf1de894a4b2"
+    },
+    {
+      "source_url": "https://massgaming.com/wp-content/uploads/MGC-Revenue-Report-October-2025.pdf",
+      "source_file": "data/raw/MA/2026-09-12/3706af50d41d731ffe4aa00a5aaf6c0ada012426c8b94c80bfba3b836b06c7fc_MGC-Revenue-Report-October-2025.pdf",
+      "source_sha256": "3706af50d41d731ffe4aa00a5aaf6c0ada012426c8b94c80bfba3b836b06c7fc"
+    },
+    {
+      "source_url": "https://massgaming.com/wp-content/uploads/MGC-Revenue-Report-September-2025.pdf",
+      "source_file": "data/raw/MA/2026-09-12/66bb4584befce49b7fd60d73056558669afbf7f97426417f0876b81b72c68f4c_MGC-Revenue-Report-September-2025.pdf",
+      "source_sha256": "66bb4584befce49b7fd60d73056558669afbf7f97426417f0876b81b72c68f4c"
+    },
+    {
+      "source_url": "https://massgaming.com/wp-content/uploads/MGC-September-2024-Revenue-Report.pdf",
+      "source_file": "data/raw/MA/2026-09-12/173cfff0460cec1e17b9a55a88c19f3d26734ed7d282163893dcfb6ce2e5c15c_MGC-September-2024-Revenue-Report.pdf",
+      "source_sha256": "173cfff0460cec1e17b9a55a88c19f3d26734ed7d282163893dcfb6ce2e5c15c"
+    },
+    {
+      "source_url": "https://www.michigan.gov/mgcb/-/media/Project/Websites/mgcb/Detroit-Casino-Revenue-Files/Internet-Gaming---2024.xlsx?rev=fcc0b988a4614fcd80deb876435f79a2&hash=3EAF0BDC3542D2648EF8DEC28BD80BFE",
+      "source_file": "data/raw/MI/2026-09-12/e8c1c3342c1e0b61053b7dc78465ab74e61e2a2917105a316ac60366fee9bf32_Internet-Gaming---2024.xlsx",
+      "source_sha256": "e8c1c3342c1e0b61053b7dc78465ab74e61e2a2917105a316ac60366fee9bf32"
+    },
+    {
+      "source_url": "https://www.michigan.gov/mgcb/-/media/Project/Websites/mgcb/Detroit-Casino-Revenue-Files/Internet-Gaming---2025.xlsx?rev=343b649ec12e4a7a9fe7a26eee4e0be8&hash=667FE7148843483E90FF3B13C54E5EF6",
+      "source_file": "data/raw/MI/2026-09-12/2372d5b46ece903b864695d85e35fb6f58ca2fca6174b38032aed64c8ab7986a_Internet-Gaming---2025.xlsx",
+      "source_sha256": "2372d5b46ece903b864695d85e35fb6f58ca2fca6174b38032aed64c8ab7986a"
+    },
+    {
+      "source_url": "https://www.michigan.gov/mgcb/-/media/Project/Websites/mgcb/Detroit-Casino-Revenue-Files/Internet-Gaming---2026.xlsx?rev=ff226c04b053461ba3fcbd87bf24fdf4&hash=A49CAD46FFBA2B3B63EB24B35DC45C3D",
+      "source_file": "data/raw/MI/2026-09-12/69663920af1cd84804481f46149cfd9917c8bd0d274c25319e514a8b9059296a_Internet-Gaming---2026.xlsx",
+      "source_sha256": "69663920af1cd84804481f46149cfd9917c8bd0d274c25319e514a8b9059296a"
+    },
+    {
+      "source_url": "https://www.michigan.gov/mgcb/-/media/Project/Websites/mgcb/Detroit-Casino-Revenue-Files/Internet-Sports-Betting---2024.xlsx?rev=f553eb08e45843298495efac636020a9&hash=ADADD755B6154F8223F94422BA351EBE",
+      "source_file": "data/raw/MI/2026-09-12/38debc4d364e170a3d667449923b8d7c30718187ac9b3f902a75ab3d8a1ba942_Internet-Sports-Betting---2024.xlsx",
+      "source_sha256": "38debc4d364e170a3d667449923b8d7c30718187ac9b3f902a75ab3d8a1ba942"
+    },
+    {
+      "source_url": "https://www.michigan.gov/mgcb/-/media/Project/Websites/mgcb/Detroit-Casino-Revenue-Files/Internet-Sports-Betting---2025.xlsx?rev=c7a4a11369d74da6b0a6a93a5038ed89&hash=5BF9737186B2544114395737D6F6E8C2",
+      "source_file": "data/raw/MI/2026-09-12/88e3f9f37773e6012422c5493752ad020fd478611ab177e5467ceed073efb6b0_Internet-Sports-Betting---2025.xlsx",
+      "source_sha256": "88e3f9f37773e6012422c5493752ad020fd478611ab177e5467ceed073efb6b0"
+    },
+    {
+      "source_url": "https://www.michigan.gov/mgcb/-/media/Project/Websites/mgcb/Detroit-Casino-Revenue-Files/Internet-Sports-Betting---2026.xlsx?rev=17cd847ea88a4b1a86245b055013b0cf&hash=15EFC480478985B51B370E433913CE29",
+      "source_file": "data/raw/MI/2026-09-12/72aac626d0c6948063ddd215279ce046f8f10e5530f76677716725dd712ab99c_Internet-Sports-Betting---2026.xlsx",
+      "source_sha256": "72aac626d0c6948063ddd215279ce046f8f10e5530f76677716725dd712ab99c"
+    }
+  ],
+  "mapping_and_context_receipt": "company_context_sources_20260912.json"
+}
