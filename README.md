@@ -35,6 +35,8 @@ The September 12 integration recovered the gaming code, notebooks, parser repair
 and tests. Its historical original, staging, and approved-candidate databases and
 raw report archive were not found locally. The retained financial studies remain
 blocked until their exact data is restored. See [recovery status](gaming/docs/data_recovery.md).
+The Pennsylvania and Colorado walkthroughs retain their separate reviewed sample
+reports; those samples do not replace the missing full archive.
 
 Vehicle evidence remains in `vehicle/data/`. Neither branch merging nor installation
 runs collectors, refreshes data, changes approved snapshots, or promotes a valuation.

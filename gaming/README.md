@@ -31,15 +31,17 @@ Notebooks 00, 10, 11, and 30 are optional offline source examples. Notebooks 00,
 10, and 11 explicitly select staging and inspect it read-only. Notebook 10 fetches
 its discovery page only when `run_live_discovery = True`; its retained workbook
 example runs offline. Notebook 30 checks expected months and handle amounts, not
-GGR/tax reconciliation. Notebooks 40–43 remain historical investigations with
+GGR/tax reconciliation. Notebooks 40–45 remain historical investigations with
 snapshot assumptions; use notebook 90 for current analysis.
 
 ## Setup (Python 3.11)
 
+Run these commands from the repository root, one level above `gaming/`:
+
 ```powershell
 py -3.11 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m jupyter lab
+.\.venv\Scripts\python.exe -m pip install -e .
+powershell -File scripts/start_jupyter.ps1
 ```
 
 Select the repository's `.venv` Python kernel. Existing environments need no reinstall.
@@ -88,8 +90,9 @@ Notebook 90 reads SQLite, consolidates observations, and displays tables and cha
   candidates are shown as pending analyst review first. It does not sum states
   into a national total.
 
-The original database is preserved. Staging contains new collections and reviewed
-parser replays; its corrections are described below. Source-check dates describe
+Before the archive became unavailable, the original database was kept separately
+from staging collections and reviewed parser replays. The historical staging
+corrections are described below. Source-check dates describe
 the inventory research, not the publication date or historical availability of a number.
 
 ## Nationwide coverage and staging
@@ -238,8 +241,9 @@ preserved; notebook 90 changed only coverage/chart cells and their explanation.
 The previous uncommitted parser/collection work and approval-bound source/configuration
 files were preserved. No approval hashes were replaced. `git diff --check` passed.
 
-These notebook-review repairs add 128 executable lines (64 net), including the expanded
-checker list, excluding tests and explanations. Changes remain local and uncommitted.
+Those notebook-review repairs added 128 executable lines (64 net), including the expanded
+checker list, excluding tests and explanations. They were recovered and committed
+in the September 12 integration; this section records the earlier validation.
 
 | Protected database | SHA-256 |
 | --- | --- |
@@ -301,9 +305,11 @@ and units, and visible pandas analysis. Test missing cells, reported zeros, nega
 dates, and duplicate keys with retained fixtures. Parsers do no downloads or writes.
 See `AGENTS.md` for the short development rules.
 
+From the repository root:
+
 ```powershell
-.\.venv\Scripts\python.exe -B -m pytest -q -p no:cacheprovider
-.\.venv\Scripts\python.exe -B scripts/check_notebooks.py
+.\.venv\Scripts\python.exe -B -m pytest -q -p no:cacheprovider gaming/tests
+.\.venv\Scripts\python.exe -B scripts/check_notebooks.py --project gaming
 ```
 
 Collector tests use mocked HTTP and temporary files/databases. The notebook check

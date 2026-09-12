@@ -4,6 +4,11 @@ Code and fixtures were restored on September 12, 2026. The original data archive
 was not found in the inspected researchOS, Documents, or Codex storage locations.
 Saved notebook output and old manifests are historical evidence, not a usable database.
 
+The separate Pennsylvania and Colorado review worktrees did retain 20 sample
+reports and metadata files. They were copied unchanged into `data/raw/PA/` and
+`data/raw/CO/` and backed up during integration. These bounded notebook samples
+do not restore the missing original/staging databases or the full raw archive.
+
 Restore these exact files relative to `gaming/` when a backup is available:
 
 | Role | Path | Expected SHA-256 |
