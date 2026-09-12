@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import warnings
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
@@ -111,6 +112,12 @@ def parse_mobile_workbook(content: bytes) -> pd.DataFrame:
             ts = _to_timestamp(cell0) if _is_month_timestamp(cell0) or isinstance(cell0, (datetime, pd.Timestamp)) else None
             if ts is None:
                 continue
+            if len(frame) >= 13 and re.fullmatch(r"FY\d{2}", sheet_name, re.I) and 1 <= row_idx <= 12:
+                fiscal_start = pd.Timestamp(year=1999 + int(sheet_name[2:]), month=7, day=1)
+                expected = fiscal_start + pd.DateOffset(months=row_idx - 1)
+                if (ts.year, ts.month) != (expected.year, expected.month):
+                    warnings.warn(f"Louisiana {sheet_name} row {row_idx}: printed date {ts.date()} conflicts with fiscal position; excluded")
+                    continue
             handle = parse_money(frame.iloc[row_idx, 2] if frame.shape[1] > 2 else None)
             net_proceeds = parse_money(frame.iloc[row_idx, 4] if frame.shape[1] > 4 else None)
             tax = parse_money(frame.iloc[row_idx, 5] if frame.shape[1] > 5 else None)

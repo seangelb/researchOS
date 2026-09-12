@@ -1,8 +1,10 @@
 """Fail-closed collector run summary: run_status vs coverage_status."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import pandas as pd
+import pytest
 
 from variant_gaming.coverage import record_coverage
 from variant_gaming.storage import connect, default_db_path, ensure_schema
@@ -121,3 +123,56 @@ def test_failure_without_prior_coverage_uses_inventory_url(tmp_path: Path, monke
     assert coverage["status"] == "failed"
     assert coverage["official_url"] == "https://gaming.az.gov/resources/reports"
     assert "down" in coverage["reason"]
+
+
+def test_selected_state_uses_real_parser_and_temporary_database(tmp_path, monkeypatch, capsys) -> None:
+    from variant_gaming import collect
+    from variant_gaming.states import massachusetts
+    from variant_gaming.storage import read_gaming_results, upsert_gaming_results
+
+    _inventory(tmp_path)
+    report = {"url": "https://massgaming.com/july.pdf", "filename": "july.pdf",
+              "expected_year": 2026, "expected_month": 7}
+    fixture = Path(__file__).parent / "fixtures" / "MA" / "MGC-Revenue-Report-July-2026.pdf"
+    downloads = []
+
+    def download(url, **kwargs):
+        downloads.append(url)
+        return SimpleNamespace(content=fixture.read_bytes(), raise_for_status=lambda: None)
+
+    def unexpected(**kwargs):
+        pytest.fail("An unselected collector ran")
+
+    monkeypatch.setattr(massachusetts, "discover_all_reports", lambda **kwargs: [report])
+    monkeypatch.setattr(massachusetts, "http_get", download)
+    monkeypatch.setattr(collect, "COLLECTORS", {
+        ("MA", "online_sports_betting"): massachusetts.collect_history,
+        ("NY", "online_sports_betting"): unexpected,
+    })
+    summary = collect.run_all_collectors(root=tmp_path, selected=[("ma", "online_sports_betting")])
+    assert downloads == [report["url"]]
+    assert summary["state_code"].tolist() == ["MA"]
+    assert summary.iloc[0]["run_status"] == "completed"
+    assert summary.iloc[0]["returned_rows"] == 8
+    assert "MA online_sports_betting" in capsys.readouterr().out
+    conn = connect(default_db_path(tmp_path))
+    stored = read_gaming_results(conn)
+    # Seed another state's row, then prove a repeat selected update leaves it alone.
+    other = stored.iloc[:1].assign(state_code="NY", jurisdiction="New York")
+    upsert_gaming_results(conn, other)
+    conn.close()
+    collect.run_all_collectors(root=tmp_path, selected=[("MA", "online_sports_betting")])
+    conn = connect(default_db_path(tmp_path))
+    assert len(read_gaming_results(conn)) == 9
+    conn.close()
+    assert len(list((tmp_path / "data" / "raw" / "MA").rglob("*.pdf"))) == 1
+
+
+@pytest.mark.parametrize("selected", [[], [("ZZ", "online_casino")]])
+def test_bad_selection_is_rejected_before_database_creation(tmp_path, selected) -> None:
+    from variant_gaming.collect import run_all_collectors
+
+    _inventory(tmp_path)
+    with pytest.raises(ValueError, match="registered"):
+        run_all_collectors(root=tmp_path, selected=selected)
+    assert not default_db_path(tmp_path).exists()

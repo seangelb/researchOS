@@ -2,6 +2,8 @@
 
 from datetime import datetime, timezone
 from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import MagicMock
 
 import pytest
 
@@ -31,6 +33,9 @@ def test_parse_sports_online_skins_july_2026() -> None:
     assert fanatics["gross_revenue"].sum() == pytest.approx(10_624_022.0)
     # Lounge-only (retail) figures must not appear as online GGR.
     assert not (parsed["gross_revenue"] == pytest.approx(-3277.0)).any()
+    # Skin pages do not provide these fields; grouping must not invent zeros.
+    assert parsed["tax"].isna().all()
+    assert parsed["taxable_revenue"].isna().all()
 
 
 def test_parse_sports_june_2019_internet_line() -> None:
@@ -89,6 +94,30 @@ def test_parse_source_cell_dash_and_negatives() -> None:
     assert parse_source_cell("")["status"] == "absent"
     assert parse_source_cell("7 4")["value"] == pytest.approx(74.0)
     assert parse_source_cell("12,345 and 67,890")["status"] == "ambiguous"
+
+
+@pytest.mark.parametrize("second_tax,expected", [(None, None), (-1.0, -1.0), (0.0, 0.0)])
+def test_brand_sum_requires_every_contributing_tax_cell(monkeypatch, second_tax, expected) -> None:
+    from variant_gaming.states import new_jersey as nj
+
+    pages = [SimpleNamespace(extract_text=lambda: "first"), SimpleNamespace(extract_text=lambda: "second")]
+    pdf = MagicMock()
+    pdf.__enter__.return_value.pages = pages
+    monkeypatch.setattr(nj.pdfplumber, "open", lambda *args: pdf)
+    monkeypatch.setattr(nj, "_page_period", lambda text: (2026, 7))
+    monkeypatch.setattr(nj, "_classify_nj_page", lambda text: "sports_tax")
+
+    def parse_page(page, text):
+        return "ok", {"operator": "Same brand", "row_type": "operator", "gross_revenue": -5.0,
+                      "tax": 0.0 if text == "first" else second_tax, "reported_revenue_name": "GGR"}
+
+    monkeypatch.setattr(nj, "parse_sports_tax_page", parse_page)
+    parsed = nj.parse_nj_pdf(b"fixture", vertical=SPORTS_VERTICAL)
+    assert parsed.iloc[0]["gross_revenue"] == -10
+    if expected is None:
+        assert parsed["tax"].isna().all()
+    else:
+        assert parsed.iloc[0]["tax"] == expected
 
 
 def test_sports_normalized_channel() -> None:

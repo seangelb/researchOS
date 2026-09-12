@@ -9,6 +9,7 @@ from pathlib import Path
 from urllib.parse import urljoin, unquote
 
 import pandas as pd
+import pdfplumber
 import requests
 from bs4 import BeautifulSoup
 
@@ -55,7 +56,8 @@ def discover_release_links(html: str, base_url: str) -> list[dict]:
         href = anchor["href"].strip()
         text = " ".join(anchor.get_text(" ", strip=True).split())
         absolute = urljoin(base_url, href)
-        if "sports-wagering-contributes" not in absolute.casefold():
+        if not any(title in absolute.casefold() for title in
+                   ("sports-wagering-contributes", "sports-wagering-sets-new-benchmark")):
             continue
         found.setdefault(
             absolute,
@@ -67,20 +69,29 @@ def discover_release_links(html: str, base_url: str) -> list[dict]:
 def discover_all_release_links(
     session: requests.Session | None = None,
 ) -> list[dict]:
-    """Union of release links from the landing page and the all-financial-reports archive."""
+    """Follow the archive's Older Entries links, including the mobile launch reports."""
     sess = session or requests.Session()
     found: dict[str, dict] = {}
-    for page_url in (LANDING_URL, ALL_REPORTS_URL):
+    pending = [LANDING_URL, ALL_REPORTS_URL]
+    visited = set()
+    while pending:
+        page_url = pending.pop(0)
+        if page_url in visited:
+            continue
+        visited.add(page_url)
         html = http_get(page_url, session=sess).text
         for item in discover_release_links(html, page_url):
             found.setdefault(item["url"], item)
+        for anchor in BeautifulSoup(html, "html.parser").select("a[href]"):
+            if "older entries" in anchor.get_text(" ", strip=True).casefold():
+                pending.append(urljoin(page_url, anchor["href"]))
     return sorted(found.values(), key=lambda item: item["url"])
 
 
-def find_excel_download(html: str, base_url: str) -> dict:
+def find_report_download(html: str, base_url: str) -> dict:
     """
     Two-hop: on a monthly release page, find the
-    'SPORTS WAGERING DATA (Excel download)' workbook link.
+    Sports Wagering Data workbook, or its accessible PDF replacement.
     """
     soup = BeautifulSoup(html, "html.parser")
     matches: list[dict] = []
@@ -89,7 +100,7 @@ def find_excel_download(html: str, base_url: str) -> dict:
         href = anchor["href"].strip()
         absolute = urljoin(base_url, href)
         if EXCEL_LINK_RE.search(text) or (
-            absolute.casefold().endswith((".xlsx", ".xls"))
+            absolute.casefold().endswith((".xlsx", ".xls", ".pdf"))
             and "sports" in absolute.casefold()
             and "wagering" in absolute.casefold()
         ):
@@ -101,7 +112,7 @@ def find_excel_download(html: str, base_url: str) -> dict:
                 }
             )
     if not matches:
-        raise RuntimeError("No Sports Wagering Data Excel download found on release page")
+        raise RuntimeError("No Sports Wagering Data workbook or accessible PDF found")
     # Prefer explicit Excel-download wording when multiple anchors exist.
     preferred = [m for m in matches if EXCEL_LINK_RE.search(m["link_text"])]
     return preferred[0] if preferred else matches[0]
@@ -129,7 +140,8 @@ def _section_label(value) -> str | None:
 
 
 def _is_total_mobile(value) -> bool:
-    return _cell_text(value).casefold() == "total mobile"
+    # Early workbooks call the subtotal within MOBILE "Combined".
+    return _cell_text(value).casefold() in {"total mobile", "combined"}
 
 
 def _to_timestamp(value) -> pd.Timestamp | None:
@@ -250,6 +262,18 @@ def parse_mobile_sports_workbook(content: bytes | Path) -> tuple[pd.DataFrame, d
     if not records:
         raise ValueError("No MOBILE licensee rows found in Maryland workbook")
 
+    parsed = pd.DataFrame(records)
+    operators = parsed[parsed.row_type == "operator"]
+    totals = parsed[parsed.row_type == "official_statewide_total"]
+    if len(totals) != 1:
+        raise ValueError("Expected one Maryland mobile subtotal")
+    # A tax-base subtotal can exclude licensee losses; do not force it to sum.
+    for column in ["handle", "tax"]:
+        total = totals.iloc[0][column]
+        if pd.notna(total) and operators[column].notna().all():
+            if abs(operators[column].sum() - total) > 1:
+                raise ValueError(f"Maryland mobile {column} does not reconcile")
+
     meta = {
         "sheet_name": sheet_name,
         "year": year,
@@ -257,7 +281,44 @@ def parse_mobile_sports_workbook(content: bytes | Path) -> tuple[pd.DataFrame, d
         "period_start": month_period(year, month)[0],
         "period_end": month_period(year, month)[1],
     }
-    return pd.DataFrame(records), meta
+    return parsed, meta
+
+
+def parse_mobile_sports_pdf(path: Path) -> tuple[pd.DataFrame, dict]:
+    """The February 2026 release supplies the same mobile table as an accessible PDF."""
+    records = []
+    period = None
+    with pdfplumber.open(path) as pdf:
+        for page in pdf.pages:
+            text = page.extract_text() or ""
+            if not re.search(r"^MOBILE$", text, re.M):
+                continue
+            match = MONTH_ENDED_RE.search(text)
+            if not match:
+                raise ValueError("Maryland mobile PDF month missing")
+            period = pd.to_datetime(match.group())
+            for table in page.extract_tables():
+                for row in table:
+                    if len(row) != 10 or row[1] != period.strftime("%B") or not row[0]:
+                        continue
+                    is_total = _is_total_mobile(row[0])
+                    records.append({"operator": "STATEWIDE" if is_total else " ".join(row[0].split()),
+                        "row_type": "official_statewide_total" if is_total else "operator",
+                        "handle": parse_money(row[2]), "taxable_revenue": parse_money(row[7]),
+                        "tax": parse_money(row[8])})
+    if not records:
+        raise ValueError("Maryland PDF has no supported mobile rows")
+    rows = pd.DataFrame(records)
+    operators = rows[rows.row_type == "operator"]
+    totals = rows[rows.row_type == "official_statewide_total"]
+    if len(totals) != 1 or operators.empty:
+        raise ValueError("Maryland PDF mobile subtotal or licensees missing")
+    for column in ["handle", "tax"]:
+        if operators[column].notna().all() and pd.notna(totals.iloc[0][column]):
+            if abs(operators[column].sum() - totals.iloc[0][column]) > 1:
+                raise ValueError(f"Maryland PDF {column} does not reconcile")
+    start, end = month_period(period.year, period.month)
+    return rows, dict(year=period.year, month=period.month, period_start=start, period_end=end)
 
 
 def build_normalized_rows(
@@ -306,10 +367,10 @@ def collect_release(
     sess = session or requests.Session()
 
     release_html = http_get(release["url"], session=sess).text
-    excel = find_excel_download(release_html, release["url"])
+    excel = find_report_download(release_html, release["url"])
     content = http_get(excel["url"], session=sess).content
-    if not content.startswith(b"PK"):
-        raise RuntimeError(f"Expected XLSX from {excel['url']}")
+    if not content.startswith((b"PK", b"%PDF")):
+        raise RuntimeError(f"Expected workbook or PDF from {excel['url']}")
 
     path = save_raw_bytes(
         root,
@@ -318,7 +379,8 @@ def collect_release(
         excel["filename"] or "maryland_sports_wagering.xlsx",
         retrieved_at=retrieved_at,
     )
-    parsed, meta = parse_mobile_sports_workbook(content)
+    parsed, meta = (parse_mobile_sports_pdf(path) if content.startswith(b"%PDF")
+                    else parse_mobile_sports_workbook(content))
     rel = str(path.relative_to(root)).replace("\\", "/")
     digest = sha256_bytes(content)
     return build_normalized_rows(

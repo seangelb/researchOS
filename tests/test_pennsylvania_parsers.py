@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 import pytest
+import pandas as pd
 
 from variant_gaming.common import utc_now
 from variant_gaming.states.pennsylvania import (
@@ -15,6 +16,7 @@ from variant_gaming.states.pennsylvania import (
     discover_fy_workbook_links,
     parse_interactive_workbook,
     parse_sports_workbook,
+    parse_sports_online_sections,
 )
 
 FIXTURES = Path(__file__).parent / "fixtures" / "PA"
@@ -79,6 +81,20 @@ def test_sports_normalize_maps_taxable(sports_bytes: bytes) -> None:
     assert (rows["vertical"] == "online_sports_betting").all()
     assert (rows["reported_revenue_name"] == SPORTS_REPORTED_REVENUE).all()
     assert rows["taxable_revenue"].notna().all()
+
+
+def test_gross_before_promotions_and_incomplete_tax_are_not_substituted():
+    frame = pd.DataFrame([
+        ["Report", "July 2025"], ["HOLLYWOOD CASINO", None],
+        ["Online Sports Wagering", None], ["Handle", 900],
+        ["Revenue", 110], ["Promotional Credits", 20],
+        ["Gross Revenue (Taxable)", 90], ["State Tax Due (34%)", 30.6],
+        ["Local Share Assessment (2%)", None],
+    ])
+    row = parse_sports_online_sections(frame).iloc[0]
+    assert row.gross_revenue == 110
+    assert row.taxable_revenue == 90
+    assert row.tax is None
 
 
 def test_parse_interactive_sums_products(interactive_bytes: bytes) -> None:

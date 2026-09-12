@@ -69,11 +69,10 @@ def test_normalize_prefers_taxable_agr_when_unambiguous(workbook_bytes: bytes) -
     # Single online brand, no retail → Taxable AGR preferred
     assert rising["reported_revenue_name"] == REPORTED_TAXABLE_AGR
     assert rising["taxable_revenue"] == pytest.approx(0.0)
-    statewide = rows[rows["operator"] == "STATEWIDE"].iloc[0]
-    assert statewide["row_type"] == "official_statewide_total"
-    assert statewide["handle"] == pytest.approx(
-        brands["handle"].sum()
-    )
+    # The old assertion blessed a calculated sum as a published total.
+    assert set(rows["row_type"]) == {"operator"}
+    assert "STATEWIDE" not in set(rows["operator"])
+    assert rows["handle"].sum() == pytest.approx(brands["handle"].sum())
 
 
 def test_discover_xlsx_links_from_landing_html() -> None:

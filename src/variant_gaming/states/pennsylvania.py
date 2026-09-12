@@ -249,6 +249,7 @@ def parse_sports_online_sections(frame: pd.DataFrame) -> pd.DataFrame:
         for col_index, year, month in months:
             handle = metrics.get("handle", {}).get((year, month))
             taxable = metrics.get("taxable", {}).get((year, month))
+            gross = metrics.get("gross", {}).get((year, month))
             state_tax = metrics.get("state_tax", {}).get((year, month))
             local_tax = metrics.get("local_tax", {}).get((year, month))
             if handle is None and taxable is None and state_tax is None:
@@ -257,8 +258,8 @@ def parse_sports_online_sections(frame: pd.DataFrame) -> pd.DataFrame:
             if (handle or 0) == 0 and (taxable or 0) == 0 and (state_tax or 0) == 0 and (local_tax or 0) == 0:
                 continue
             tax = None
-            if state_tax is not None or local_tax is not None:
-                tax = (state_tax or 0.0) + (local_tax or 0.0)
+            if state_tax is not None and local_tax is not None:
+                tax = state_tax + local_tax
             period_start, period_end = month_period(year, month)
             is_total = _normalize_label(current_operator) == "grand total"
             records.append(
@@ -270,6 +271,7 @@ def parse_sports_online_sections(frame: pd.DataFrame) -> pd.DataFrame:
                     "year": year,
                     "month": month,
                     "handle": handle,
+                    "gross_revenue": gross,
                     "taxable_revenue": taxable,
                     "tax": tax,
                 }
@@ -309,6 +311,8 @@ def parse_sports_online_sections(frame: pd.DataFrame) -> pd.DataFrame:
             key = "handle"
         elif norm == "gross revenue (taxable)":
             key = "taxable"
+        elif norm == "revenue":
+            key = "gross"
         elif norm.startswith("state tax due"):
             key = "state_tax"
         elif norm.startswith("local share assessment"):
@@ -437,7 +441,6 @@ def build_sports_normalized(
         vertical=SPORTS_VERTICAL,
         channel="online",
         frequency="monthly",
-        gross_revenue=pd.NA,
         adjusted_revenue=pd.NA,
         net_proceeds=pd.NA,
         reported_revenue_name=SPORTS_REPORTED_REVENUE,
