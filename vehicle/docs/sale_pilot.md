@@ -1,4 +1,11 @@
-# Follow the same VINs and retain Carvana's Sold status
+# Original frozen cohorts and legacy native captures
+
+This reference preserves the original pilot capture/import workflow and its dated
+results. Notebook 22 reads those legacy captures; it does not automatically include
+newer browser batches or research passes, even for a VIN in the original cohorts.
+Review those sources in 23/24. Use the [operating guide](status_experiment.md) for
+routine review and [browser reservations](browser_detail_batches.md) for every new
+visit. An import batch size is not a browser-start allowance.
 
 Open [Notebook 20](../notebooks/20_carvana_history_analysis.ipynb) first for daily
 inventory, matched-VIN asking prices, actual collection intervals, and canonical
@@ -111,59 +118,20 @@ The run is retained in
 The earlier seven-page study remains unchanged. All 14 page observations are
 available for comparison at a sufficiently late cutoff.
 
-## What is automatic and what is manual
+## New visits and already-retained evidence
 
-1. **Manual:** visit the selected original URL in Chrome and wait for the page.
-2. **Repeatable extraction:** the small JavaScript helper reads embedded React
-   records from the loaded DOM, joins their stream chunks, JSON-decodes them, and
-   keeps only public vehicle identities/statuses and the specific hero/button.
-3. **Manual:** copy the helper's JSON result into a new UTF-8 file.
-4. **Repeatable import:** Python validates the selected cohort VIN, target listing,
-   URLs and clocks; previews the interpretation; and saves only with `--save`.
-5. **Automatic offline analysis:** Notebook 22 reads the saved captures, verifies
-   hashes, filters by the evidence cutoff, and compares observations per VIN.
+Every new browser visit uses the existing reserve, Chrome capture and record steps
+in the [browser batch guide](browser_detail_batches.md). For a selected frozen study,
+prepare its batch through `run_status_experiment.py batch` as described in the
+operating guide. The shared budget, VIN spacing, unresolved reservations and access
+stops apply across batches. Do not open cohort URLs directly to avoid those controls.
 
-This is a **browser-assisted workflow**, not an unattended Python scraper.
-The earlier plain Python GET returned a 403 challenge; this milestone did not
-retry it. A dedicated browser framework and scheduled national scraping are
-outside this small pilot.
-
-## Run the next check
-
-Launch Jupyter from the repository root:
-
-```powershell
-powershell -File scripts/start_jupyter.ps1
-```
-
-Open `vehicle/notebooks/22_carvana_sale_status_validation.ipynb`, Run All, and find
-the coverage and source tables. Its queue shows fixed identities, original URLs
-and selection reasons from `vehicle/config/carvana_sale_pilot.json` and
-`vehicle/config/carvana_sale_pilot_extension_20260909.json`. Do not resample or
-rewrite those files. Follow each cohort separately.
-
-Open a selected URL in Chrome. Open DevTools Console (Ctrl+Shift+J), inspect and
-paste the function in
-[capture_carvana_page.js](../scripts/capture_carvana_page.js), then invoke it
-with the queue's exact VIN and listing ID. Example for the missing Tesla:
-
-```javascript
-copy(JSON.stringify(captureCarvanaPage({
-  vin: '5YJ3E1EAXPF590130', listing_id: '4632932'
-}), null, 2))
-```
-
-`copy` is a Chrome DevTools command that copies the returned JSON to the clipboard.
-Paste into a new `.json` file in a scratch folder, saved as UTF-8. The function
-does not click anything, make additional requests, or write files. Do not change
-the generated physical check time to the later import time.
-
-Repeat for the same cohort, at most 12 page captures per import batch, with modest spacing.
-Keep the frozen VINs. If a retained inventory observation or inspected public
-page supplies a different listing ID for the same VIN, explicitly use that ID
-in the capture call and verify the VIN. Both IDs remain in history; the cohort's
-original URL is not silently replaced. An old Sold page alone does not prove the
-VIN is still unavailable under every possible listing ID.
+The lower-level legacy importer below remains available to validate and preserve
+**already-retained** pilot projections. It makes no requests, creates no browser
+reservation and cannot authorize another capture allowance. Its original cohort
+files retain the frozen identities and its source-selection rules remain unchanged.
+Each imported result belongs to that legacy evidence class; do not copy newer batch
+results into it simply to make Notebook 22's freshness agree with another view.
 
 From the repository root, preview the files:
 
@@ -171,14 +139,14 @@ From the repository root, preview the files:
 .\.venv\Scripts\python.exe -B vehicle/scripts/import_carvana_sale_pilot.py --cohort vehicle/config/carvana_sale_pilot.json --input "C:\path\capture_01.json" "C:\path\capture_02.json"
 ```
 
-For the extension, use its exact cohort file instead (still at most 12 captures
-per batch; do not combine original and extension captures):
+For already-retained extension projections, use its exact cohort file instead
+(at most 12 supplied files per import; this is not a permission to visit pages):
 
 ```powershell
 .\.venv\Scripts\python.exe -B vehicle/scripts/import_carvana_sale_pilot.py --cohort vehicle/config/carvana_sale_pilot_extension_20260909.json --input "C:\path\extension_01.json" "C:\path\extension_02.json"
 ```
 
-The extension's 26 VINs therefore require multiple batches if all are checked.
+Import-file limits do not set or reset the shared browser-start budget.
 Read the printed expected identities, native values, interpreted status and parse
 outcome. Repeat that exact command with `--save` to retain a new experimental run.
 The importer never writes the inventory database, registered cycles, canonical
@@ -191,13 +159,13 @@ If `AS_OF_OVERRIDE` is set, deliberately advance it to include the new evidence.
 The two clocks are different: `checked_at` is the actual browser observation;
 `available_at` is when the import became available. All timestamps are UTC.
 
-## Access failures
+## Historical failure-record format
 
-If a page is blocked, do not retry challenges or fill in its previous vehicle
-fields. Retain the actual failure as a separate JSON projection and stop that live
-pass. Report remaining cohort VINs as unvisited; do not retry the blocked page or
-continue the remaining visits in that pass. For example,
-the following is a **template, not an observation**: replace the expected identity,
+For a newly reserved visit, use `run_carvana_details.py fail` and the shared stop
+rules in the browser guide. Do not retry a challenge or fill in previous vehicle
+fields. The following legacy template is retained for an already-observed failure
+being imported; it does not replace the reserved visit's failure checkpoint.
+It is a **template, not an observation**: replace the expected identity,
 URLs, check time and note with what was actually observed.
 
 ```json

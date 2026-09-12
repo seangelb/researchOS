@@ -6,6 +6,8 @@ selection, evidence and progress; it never makes a request or launches a browser
 import hashlib
 import json
 import os
+import math
+from contextlib import contextmanager
 from pathlib import Path
 import tempfile
 
@@ -14,6 +16,150 @@ import pandas as pd
 from vehicle_tracker.events import _aware
 from vehicle_tracker.sale_pilot import (FORMAT, NATIVE, known_disjoint_cohorts,
     _read_capture, load_research_pass, load_selection_plan, parse_capture)
+
+
+ROLLING_DAY_LIMIT = 12
+# Local pilot workload policy, not a measured or published Carvana access limit.
+RESERVATION_LOCK = '.reservation.lock'
+
+
+@contextmanager
+def _reservation_lock(root, *, now):
+    """One owner reserves browser starts across all sibling batches."""
+    path = Path(root)/RESERVATION_LOCK
+    try:
+        handle = path.open('x', encoding='utf-8')
+    except FileExistsError as error:
+        raise ValueError('Browser reservation lock exists; inspect its owner before recovery, never skip it') from error
+    try:
+        with handle:
+            json.dump(dict(pid=os.getpid(), acquired_at=_aware(now).isoformat()), handle)
+            handle.flush()
+            os.fsync(handle.fileno())
+            yield
+    finally:
+        path.unlink()
+
+
+def _workload(root, *, now):
+    """Count starts, including failures, under the caller's reservation lock."""
+    cutoff = _aware(now)
+    visits = []
+    for path in sorted(Path(root).glob('*/batch.json')):
+        batch, _, selected = read_batch(path.parent)
+        if _aware(batch['created_at']) > cutoff:
+            continue
+        for attempt, started, report in checkpoints(path.parent, selected):
+            start = _aware(started['started_at'])
+            if start > cutoff:
+                continue
+            unresolved = report is None or _aware(report['available_at']) > cutoff
+            record = None if unresolved else _read_capture(attempt/'run.json', report['captures'][0],
+                                                           available_at=report['available_at'])
+            visits.append(dict(**started['expected'], started_at=start, unresolved=unresolved,
+                checked_at=start if unresolved else _aware(record['checked_at']),
+                access_blocked=False if unresolved else record['access_outcome'] == 'access_blocked',
+                available_at=None if unresolved else _aware(report['available_at'])))
+    recent = sorted(v['started_at'] for v in visits if v['started_at'] > cutoff-pd.Timedelta(hours=24))
+    unresolved = sum(v['unresolved'] for v in visits)
+    next_start = cutoff
+    if len(recent) >= ROLLING_DAY_LIMIT:
+        next_start = max(next_start, recent[len(recent)-ROLLING_DAY_LIMIT]+pd.Timedelta(hours=24))
+    finished = [v['available_at'] for v in visits if not v['unresolved']]
+    if finished:
+        next_start = max(next_start, max(finished)+pd.Timedelta(seconds=15))
+    blocked = [v['checked_at'] for v in visits if v['access_blocked']
+               and v['checked_at'] > cutoff-pd.Timedelta(hours=24)]
+    if blocked:
+        next_start = max(next_start, max(blocked)+pd.Timedelta(hours=24))
+    reason = ('Unresolved browser visit: recover or explicitly fail it first' if unresolved else
+              'Access challenge: all browser batches pause for 24 hours after the blocked check' if blocked else
+              'Rolling 24-hour limit of 12 browser starts reached' if len(recent) >= ROLLING_DAY_LIMIT else
+              'Wait 15 seconds after the latest saved browser visit' if next_start > cutoff else '')
+    return dict(as_of=cutoff.isoformat(), rolling_24h_limit=ROLLING_DAY_LIMIT,
+        attempted_last_24h=len(recent), remaining_starts=max(0, ROLLING_DAY_LIMIT-len(recent)),
+        unresolved_visits=unresolved, access_blocks_last_24h=len(blocked),
+        next_start_at=None if unresolved else next_start.isoformat(),
+        blocked_reason=reason, reservation_lock_present=False,
+        limitation='Counts retained browser reservations; direct manual navigation is not enforced'), visits
+
+
+def browser_workload(root, *, now):
+    """Read-only budget preview; an active/crashed lock is never auto-cleared."""
+    if (Path(root)/RESERVATION_LOCK).exists():
+        return dict(as_of=_aware(now).isoformat(), rolling_24h_limit=ROLLING_DAY_LIMIT,
+            attempted_last_24h=None, remaining_starts=None, unresolved_visits=None,
+            access_blocks_last_24h=None,
+            next_start_at=None, blocked_reason='Browser reservation lock exists; inspect owner before recovery',
+            reservation_lock_present=True,
+            limitation='Counts retained browser reservations; direct manual navigation is not enforced')
+    return _workload(root, now=now)[0]
+
+
+def browser_capacity(root, requests, *, now, prior_checks=(), minutes_per_check=1.5,
+                     operator_minutes_per_day=20):
+    """Schedule a small proposed study against retained starts without writing.
+
+    Each request has wave, retailer, VIN, start and end. Capacity means requests
+    that fit, including assumed capture/save time and 15 seconds after saving.
+    Operator time is an explicit planning assumption, including historical starts
+    whose active effort was not measured. Future unrelated work is not reserved.
+    An unresolved visit or lock has no assumed recovery time and blocks approval.
+    """
+    for value in [minutes_per_check, operator_minutes_per_day]:
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(value) or value <= 0:
+            raise ValueError('Operator effort assumptions must be positive finite minutes')
+    cutoff = _aware(now)
+    duration = pd.Timedelta(minutes=minutes_per_check)
+    daily_limit = min(ROLLING_DAY_LIMIT, math.floor(operator_minutes_per_day / minutes_per_check))
+    workload = browser_workload(root, now=cutoff)
+    blocked = workload['blocked_reason'] if (workload['reservation_lock_present'] or workload['unresolved_visits']) else ''
+    if not daily_limit:
+        blocked = blocked or 'One check exceeds the planned daily operator effort'
+    visits = [] if workload['reservation_lock_present'] else _workload(root, now=cutoff)[1]
+    starts = [visit['started_at'] for visit in visits]
+    last_checked = {}
+    for visit in [*visits, *prior_checks]:
+        checked = _aware(visit['checked_at'])
+        if checked <= cutoff:
+            key = (visit['retailer'], visit['vin'])
+            last_checked[key] = max(checked, last_checked.get(key, checked))
+    next_start = max(cutoff, _aware(workload['next_start_at'])) if workload['next_start_at'] else cutoff
+    scheduled = []
+    ordered = sorted(requests, key=lambda r: (_aware(r['end']), _aware(r['start']), r['retailer'], r['vin']))
+    keys = [(r['wave'], r['retailer'], r['vin']) for r in ordered]
+    if len(keys) != len(set(keys)):
+        raise ValueError('One capacity request per VIN and wave is required')
+    pending = list(ordered)
+    while pending:
+        # Earliest deadline first; within a wave choose the VIN available first.
+        deadline = min(_aware(r['end']) for r in pending)
+        group = [r for r in pending if _aware(r['end']) == deadline]
+        def ready(request):
+            previous = last_checked.get((request['retailer'], request['vin']))
+            return max(next_start, _aware(request['start']),
+                       previous + pd.Timedelta(hours=24) if previous is not None else cutoff)
+        request = min(group, key=lambda r: (ready(r), r['retailer'], r['vin']))
+        pending.remove(request)
+        start = ready(request)
+        if _aware(request['start']) >= deadline:
+            raise ValueError('Observation window end must follow its start')
+        if not blocked:
+            recent = sorted(s for s in starts if start-pd.Timedelta(hours=24) < s <= start)
+            while len(recent) >= daily_limit:
+                start = recent[len(recent)-daily_limit]+pd.Timedelta(hours=24)
+                recent = sorted(s for s in starts if start-pd.Timedelta(hours=24) < s <= start)
+        fits = not blocked and start + duration < deadline
+        scheduled.append(dict(**request, planned_start=start.isoformat() if fits else None,
+            planned_capture_at=(start+duration).isoformat() if fits else None, fits=bool(fits),
+            reason=blocked if blocked else '' if fits else 'Insufficient time/capacity before the fixed deadline'))
+        if fits:
+            starts.append(start)
+            last_checked[(request['retailer'], request['vin'])] = start+duration
+            next_start = start+duration+pd.Timedelta(seconds=15)
+    return dict(workload=workload, checks=scheduled, minutes_per_check=minutes_per_check,
+        operator_minutes_per_day=operator_minutes_per_day, effective_starts_per_rolling_day=daily_limit,
+        assumption='Sequential operator availability throughout the windows; assumed effort for every start; no future competing work or retries reserved')
 
 
 def digest(path):
@@ -50,8 +196,34 @@ def preview_plan(path, *, now):
     return plan, selected
 
 
+def validate_inventory_plan(plan, *, config_path=None, verify_sources=False):
+    """Bind new inventory selections without rewriting legacy studies or recovery.
+
+    Starting/preparing checks immutable inventory sources and configuration bytes.
+    Recording an already reserved visit needs only its frozen target, even if the
+    live inventory configuration has since changed.
+    """
+    context = plan.get('inventory_context')
+    if context is None:
+        if config_path is not None:
+            raise ValueError('Legacy plan has no inventory scope binding; --config cannot relabel its targets')
+        return
+    if config_path is not None and Path(config_path).resolve() != Path(context['config_path']).resolve():
+        raise ValueError('Selected configuration differs from the frozen plan inventory scope')
+    if any(not context['scope_id'] or page.get('inventory_scope_id') != context['scope_id'] for page in plan['pages']):
+        raise ValueError('Selected page differs from the plan inventory scope')
+    if verify_sources:
+        for name in [context['config_path'], context['query_plan'], *context['source_paths']]:
+            path = Path(name)
+            if not path.is_file() or digest(path) != plan['input_hashes'].get(str(path)):
+                raise ValueError('Inventory configuration or retained selection source changed: ' + str(path))
+
+
 def create_batch(plan_path, destination, *, helper_path, cohorts, now):
     plan, selected = preview_plan(plan_path, now=now)
+    validate_inventory_plan(plan, verify_sources=True)
+    if plan.get('preparation_blocked_reason'):
+        raise ValueError(plan['preparation_blocked_reason'])
     if _aware(now) >= _aware(plan['expires_at']):
         raise ValueError('Expired plan; prepare a fresh selection')
     members = {(v['retailer'], v['vin']) for c in known_disjoint_cohorts(cohorts, as_of=now) for v in c['vehicles']}
@@ -105,9 +277,15 @@ def checkpoints(folder, selected):
 
 
 def begin_visit(folder, *, now):
-    """Reserve one navigation before touching Chrome. Never repeat a started visit."""
+    """Atomically enforce the shared budget before reserving one Chrome visit."""
+    with _reservation_lock(Path(folder).parent, now=now):
+        return _begin_visit(folder, now=now)
+
+
+def _begin_visit(folder, *, now):
     folder = Path(folder)
     batch, plan, selected = read_batch(folder)
+    validate_inventory_plan(plan, verify_sources=True)
     time = _aware(now)
     if not _aware(batch['created_at']) <= time < _aware(plan['expires_at']):
         raise ValueError('Browser batch window has not started or expired')
@@ -123,23 +301,12 @@ def begin_visit(folder, *, now):
     if len(previous) == len(selected):
         raise ValueError('Batch is complete; no more visits')
     target = selected.iloc[len(previous)]
-    # A second plan must not bypass an unresolved visit or the VIN-level 24h clock.
-    for path in sorted(folder.parent.glob('*/batch.json')):
-        if path.parent.resolve() == folder.resolve():
-            continue
-        other_batch, _, other_selected = read_batch(path.parent)
-        if _aware(other_batch['created_at']) > time:
-            continue
-        for other_attempt, started, report in checkpoints(path.parent, other_selected):
-            if (started['expected']['retailer'], started['expected']['vin']) != (target.retailer, target.vin):
-                continue
-            if _aware(started['started_at']) > time:
-                continue
-            if report is None or _aware(report['available_at']) > time:
-                raise ValueError('Unresolved visit in another batch; recover or explicitly fail it first')
-            row = _read_capture(other_attempt/'run.json', report['captures'][0], available_at=report['available_at'])
-            if time < _aware(row['checked_at']) + pd.Timedelta(hours=24):
-                raise ValueError('Wait 24 hours after the previous VIN visit in another batch')
+    workload, visits = _workload(folder.parent, now=time)
+    if workload['blocked_reason']:
+        raise ValueError(workload['blocked_reason'])
+    if any((v['retailer'], v['vin']) == (target.retailer, target.vin)
+           and time < v['checked_at']+pd.Timedelta(hours=24) for v in visits):
+        raise ValueError('Wait 24 hours after the previous VIN visit in another batch')
     attempt = folder / f'visit_{len(previous)+1:02d}'
     attempt.mkdir(exist_ok=False)
     started = dict(started_at=time.isoformat(), expected={key: target[key] for key in ['retailer','vin','listing_id']},
@@ -250,7 +417,8 @@ def load_browser_batches(root, cohorts, *, as_of):
         for index, target in enumerate(selected.itertuples()):
             state = dict(batch=folder.name, retailer=target.retailer, vin=target.vin, listing_id=target.listing_id,
                 outcome='unattempted', started_at=None, available_at=None, saleStatus=None, purchaseType=None,
-                observed_status=None, window_expired=cutoff >= _aware(plan['expires_at']))
+                observed_status=None, checked_at=None, source=None,
+                window_expired=cutoff >= _aware(plan['expires_at']))
             if index < len(attempts):
                 attempt, started, report = attempts[index]
                 if _aware(started['started_at']) <= cutoff:
@@ -259,7 +427,8 @@ def load_browser_batches(root, cohorts, *, as_of):
                     inputs.add(attempt/'started.json')
                     state.update(outcome='started_unresolved', started_at=started['started_at'])
                     if report and _aware(report['available_at']) <= cutoff:
-                        _, rows = load_research_pass(attempt/'run.json', selected, cohorts, as_of=as_of)
+                        _, rows = load_research_pass(attempt/'run.json', selected, cohorts, as_of=as_of,
+                                                     membership_as_of=batch['created_at'])
                         if len(rows) != 1 or rows.iloc[0].listing_id != target.listing_id:
                             raise ValueError('Completed visit does not match its reserved target')
                         row = rows.iloc[0]
@@ -272,7 +441,8 @@ def load_browser_batches(root, cohorts, *, as_of):
                             if abandoned['file'] != 'capture.json' or digest(attempt/'capture.json') != abandoned['sha256']:
                                 raise ValueError('Abandoned capture changed')
                             inputs.add(attempt/'capture.json')
-                        state.update({key: row[key] for key in ['available_at','saleStatus','purchaseType','observed_status']})
+                        state.update({key: row[key] for key in ['available_at','saleStatus','purchaseType','observed_status',
+                                                              'checked_at', 'source']})
                         state['outcome'] = row.parse_outcome
             health.append(state)
     return (pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(),

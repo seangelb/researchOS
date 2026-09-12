@@ -13,9 +13,10 @@ ROOT = Path(history_module.__file__).resolve().parents[3]
 spec = importlib.util.spec_from_file_location('daily_notebook_guards', ROOT / 'scripts/check_notebooks.py')
 checker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(checker)
-CELL_IDS = ['daily-operating-view', 'daily-cycle-data', 'daily-operating-tables',
-            'daily-vin-analysis', 'daily-asking-prices', 'daily-price-composition', 'daily-price-bridge',
-            'daily-observed-age-prices', 'sale-review-data',
+CELL_IDS = ['daily-analyst-settings', 'daily-operating-view', 'daily-cycle-data', 'daily-operating-tables',
+            'daily-vin-analysis', 'daily-comparison-eligibility', 'daily-vin-join',
+            'daily-asking-prices', 'daily-price-composition', 'daily-price-bridge',
+            'daily-observed-age-prices', 'daily-observed-age-clock', 'daily-observed-age-summary', 'sale-review-data',
             'daily-synthetic-example', 'sale-review-example']
 
 

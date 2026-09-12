@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from urllib.parse import urlsplit
 from uuid import uuid4
+import math
 import re
 import time
 
@@ -30,7 +31,10 @@ class NavigationBudget:
     last_request: float | None = field(default=None, init=False)
 
     def __post_init__(self):
-        if not 1 <= self.max_requests <= 600 or not 0 < self.max_seconds <= 3600 or self.pause_seconds < 3:
+        if (type(self.max_requests) is not int or not 1 <= self.max_requests <= 600
+                or type(self.max_seconds) not in (int, float) or not 0 < self.max_seconds <= 3600
+                or type(self.pause_seconds) not in (int, float)
+                or not math.isfinite(self.pause_seconds) or self.pause_seconds < 3):
             raise ValueError('Use <=600 requests, <=3600 seconds and at least three seconds spacing')
 
     def stop(self):
@@ -54,7 +58,11 @@ class NavigationBudget:
         if self.requests >= self.max_requests:
             raise CollectionStopped('Request budget exhausted')
         if self.last_request is not None:
-            time.sleep(max(0, self.pause_seconds - (time.monotonic() - self.last_request)))
+            # Python 3.11 on Windows uses a coarse monotonic clock. Its elapsed
+            # value can overstate real elapsed time by one clock tick, so include
+            # that resolution even when the apparent interval has just reached 3s.
+            margin = time.get_clock_info('monotonic').resolution
+            time.sleep(max(0, self.pause_seconds + margin - (time.monotonic() - self.last_request)))
         self.timeout_ms()
         self.requests += 1  # Reserve before sending; uncertain failures still count.
         self.last_request = time.monotonic()

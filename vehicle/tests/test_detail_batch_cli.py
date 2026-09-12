@@ -43,16 +43,26 @@ def test_cli_rejects_controls_equal_to_entire_batch_before_loading_inputs(cli, m
     assert error.value.code == 2
 
 
+def test_cli_cannot_start_a_copied_batch_outside_shared_budget_directory(cli, monkeypatch, tmp_path):
+    monkeypatch.setattr(cli, 'cohort_inputs', lambda *a, **k: pytest.fail('Reject before reading inputs'))
+    with pytest.raises(SystemExit) as error:
+        cli.main(['next', '--batch', str(tmp_path/'copied_batch')])
+    assert error.value.code == 2
+
+
 def test_fresh_plan_passes_unresolved_browser_health_into_queue(cli, monkeypatch, tmp_path):
     """An unfinished reservation must not disappear at the CLI/queue boundary."""
     from test_sales_proxy import native, synthetic_vehicle
 
     source = tmp_path / 'retained.json'
     source.write_text('{}', encoding='utf-8')
-    settings = {key: source for key in ['config_path', 'plan', 'register', 'database']}
-    inventory = pd.DataFrame([dict(source_path=str(source))])
+    monkeypatch.setattr(cli, 'ROOT', tmp_path)
+    monkeypatch.setattr(cli, 'utc_now', lambda: '2026-09-02T12:00:00+00:00')
+    settings = dict(config_path=tmp_path/'config/carvana_daily_tracking.json', plan=source,
+                    register=tmp_path/'cycles.json', database=source, queries=[{}], timezone='UTC')
     records = pd.DataFrame([dict(native(1), source=str(source))])
     target = synthetic_vehicle()
+    inventory = pd.DataFrame([dict(target, cycle_id='synthetic', source_path=str(source))])
     health = pd.DataFrame([dict(batch='unfinished', retailer=target['retailer'], vin=target['vin'],
         listing_id=target['listing_id'], outcome='started_unresolved',
         started_at='2026-09-02T10:00:00Z', available_at=None, window_expired=False)])
@@ -60,12 +70,16 @@ def test_fresh_plan_passes_unresolved_browser_health_into_queue(cli, monkeypatch
     captured = {}
 
     monkeypatch.setattr(cli, 'tracking_settings', lambda path: settings)
-    monkeypatch.setattr(cli, 'tracking_history', lambda settings, **kwargs: (pd.DataFrame(), inventory))
-    monkeypatch.setattr(cli, 'load_pilot', lambda *args, **kwargs: records)
-    monkeypatch.setattr(cli, 'load_selection_plan', lambda *args, **kwargs: selections)
-    monkeypatch.setattr(cli, 'load_research_pass', lambda *args, **kwargs: ({}, records))
-    monkeypatch.setattr(cli, 'load_browser_batches', lambda *args, **kwargs:
-        (pd.DataFrame(), pd.DataFrame(), health, set()))
+    monkeypatch.setattr(cli, 'tracking_history', lambda settings, **kwargs:
+                        (pd.DataFrame(columns=['cycle_date', 'cycle_id', 'available_at']), inventory))
+    cohort_paths = {tmp_path/'config/carvana_sale_pilot.json',
+                    tmp_path/'config/carvana_sale_pilot_extension_20260909.json'}
+    for path in cohort_paths:
+        path.parent.mkdir(exist_ok=True)
+        path.write_text('{}', encoding='utf-8')
+    monkeypatch.setattr(cli, 'load_detail_evidence', lambda *args, **kwargs:
+        dict(cohorts=kwargs['cohorts'], records=records, selection_plans=selections,
+             browser_health=health, input_paths={source, *cohort_paths}))
     monkeypatch.setattr(cli, 'digest', lambda path: 'synthetic-hash')
 
     def queue(*args, **kwargs):
@@ -73,6 +87,7 @@ def test_fresh_plan_passes_unresolved_browser_health_into_queue(cli, monkeypatch
         return pd.DataFrame([dict(target, selected_for_check=True, selection_reason='synthetic only')])
 
     monkeypatch.setattr(cli, 'inventory_followup_queue', queue)
-    cli.fresh_plan([{}], as_of='2026-09-02T12:00:00Z', limit=6, controls=2,
-                   seed='synthetic', minutes=45)
+    result = cli.fresh_plan([], as_of='2026-09-02T12:00:00Z', limit=6, controls=2,
+                            seed='synthetic', minutes=45)
     pd.testing.assert_frame_equal(captured['browser_health'], health)
+    assert set(map(str, cohort_paths)) <= set(result['input_hashes'])

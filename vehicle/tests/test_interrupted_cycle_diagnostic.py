@@ -171,6 +171,7 @@ def test_expired_window_and_notebook_keep_partial_rows_out_of_inventory(interrup
     days = pd.DataFrame([dict(cycle_date='2026-09-07', coverage_complete=True)])
     observations = pd.DataFrame([dict(vin='REGISTERED-ONLY')])
     scope = dict(pd=pd, daily_cycles=days.copy(), daily_observations=observations.copy(), tracking=settings,
+                 EXPLICIT_CYCLE_SELECTION=False,
                  display=lambda *args: None)
     before = snapshot(path.parent.parent)
     with checker.offline_guards():

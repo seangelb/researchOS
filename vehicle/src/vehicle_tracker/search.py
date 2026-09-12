@@ -22,6 +22,15 @@ FIELDS = ('vehicleId', 'vin', 'year', 'make', 'model', 'parentModel', 'mileage',
           'vehicleInventoryType', 'isOnDemand', 'transportCost')
 
 
+def build_search_request(*, filters, zip_code, page=1, location_filter=False):
+    """Use one public payload for collection, retained replay and notebook preview."""
+    request = dict(filters=filters, pagination=dict(page=page, pageSize=24),
+                   sortBy='MostPopular', zip5=zip_code)
+    if location_filter:
+        request['requestedFeatures'] = ['LocationBasedPrefiltering']
+    return request
+
+
 def project_response(data, request, *, observed_at):
     """Retain public inventory fields only; this is not an original response body.
 
@@ -120,31 +129,46 @@ def search_transport(post=None):
 
 
 def collect_search(*, filters, zip_code, destination, target_listings=1000, budget=None, post=None,
-                   location_filter=False, known_listing_ids=None):
+                   location_filter=False, known_listing_ids=None, target_vins=None,
+                   known_listing_vins=None, page_progress=None):
     """Collect one query with immutable evidence and an explicit attempt journal."""
     with search_transport(post) as send:
         return _collect_search(filters=filters, zip_code=zip_code, destination=destination,
             target_listings=target_listings, budget=budget, post=send,
-            location_filter=location_filter, known_listing_ids=known_listing_ids)
+            location_filter=location_filter, known_listing_ids=known_listing_ids,
+            target_vins=target_vins, known_listing_vins=known_listing_vins,
+            page_progress=page_progress)
 
 
 def _collect_search(*, filters, zip_code, destination, target_listings, budget, post,
-                    location_filter, known_listing_ids):
+                    location_filter, known_listing_ids, target_vins, known_listing_vins,
+                    page_progress):
     if not re.fullmatch(r'\d{5}', zip_code) or (target_listings is not None and
             (type(target_listings) is not int or target_listings < 1)) or type(location_filter) is not bool:
         raise ValueError('Require a five-digit ZIP and positive listing target')
     if set(filters) - {'makes', 'year'}:
         raise ValueError('Only the observed make/model/year filter contract is supported')
+    if target_vins is not None:
+        if type(target_vins) is not int or target_vins < 1:
+            raise ValueError('Require a positive distinct VIN target')
+        target_listings = None
     destination = Path(destination)
     destination.mkdir(parents=True, exist_ok=False)
     (destination/'attempts').mkdir()
     budget = budget or NavigationBudget()
     run_id, seen, vins = uuid4().hex, set(), set()
     known = {identity for retailer, identity in (known_listing_ids or set()) if retailer == 'carvana'}
+    known_pairs = dict(known_listing_vins or {})
+    known_vins = set(known_pairs.values())
+    known_vin_listings = {vin: listing for listing, vin in known_pairs.items()}
+    if len(known_vin_listings) != len(known_pairs):
+        raise ValueError('Known VINs have conflicting listing identities')
     start_requests, started = budget.requests, time.monotonic()
     report = dict(run_id=run_id, filters=filters, zip_code=zip_code, endpoint=ENDPOINT,
         started_utc=datetime.now(timezone.utc).isoformat(), target_listings=target_listings,
-        target_definition='New listing IDs contributed beyond earlier plan queries',
+        target_vins=target_vins,
+        target_definition=('Distinct VINs contributed beyond earlier plan queries' if target_vins is not None
+                           else 'New listing IDs contributed beyond earlier plan queries'),
         pages=[], status='partial', reason='', query_complete=False, complete_query_count=None,
         national_coverage_verified=False, location_filter=location_filter,
         population='Public search response; national retail universe unverified',
@@ -159,8 +183,11 @@ def _collect_search(*, filters, zip_code, destination, target_listings, budget, 
         report.update(unique_listings=len(seen), unique_vins=len(vins), reported_total=total,
             complete_query_count=len(seen) if report['query_complete'] else None,
             new_unique_listings=len(seen-known), target_reached=target_listings is not None and len(seen-known)>=target_listings,
+            new_unique_vins=len(vins-known_vins),
             requests=budget.requests-start_requests, elapsed_seconds=time.monotonic()-started,
             ended_utc=datetime.now(timezone.utc).isoformat())
+        if target_vins is not None:
+            report['target_reached'] = len(vins-known_vins) >= target_vins
         if entry is not None:
             write_json_atomic(destination/'attempts'/f"{entry['page']:04d}.json",
                 dict(run_id=run_id, request=request, **entry))
@@ -168,9 +195,8 @@ def _collect_search(*, filters, zip_code, destination, target_listings, budget, 
 
     checkpoint()
     while True:
-        request = dict(filters=filters, pagination=dict(page=number, pageSize=24), sortBy='MostPopular', zip5=zip_code)
-        if location_filter:
-            request['requestedFeatures'] = ['LocationBasedPrefiltering']
+        request = build_search_request(filters=filters, zip_code=zip_code, page=number,
+                                       location_filter=location_filter)
         entry = dict(page=number, attempt_id=uuid4().hex, status='pending', stored_rows=0,
             outcome_kind='unattempted', request_started_at_utc=None, response_received_at_utc=None,
             evidence_available_at_utc=None)
@@ -245,6 +271,22 @@ def _collect_search(*, filters, zip_code, destination, target_listings, budget, 
             current, current_vins = set(frame.listing_id), set(frame.vin.dropna())
             if current & seen or current_vins & vins or frame.vin.isna().any():
                 raise CollectionStopped('Repeated or missing identities; query coverage unstable')
+            if target_vins is not None:
+                expected_rows = min(24, max(0, total - 24 * (number - 1)))
+                if len(frame) != expected_rows:
+                    raise CollectionStopped('Page row count differs from declared pagination')
+            stage = 'identity_failure'
+            pairs = dict(zip(frame.listing_id, frame.vin))
+            conflicts = [dict(listing_id=listing, vin=vin,
+                              earlier_vin=known_pairs.get(listing),
+                              earlier_listing_id=known_vin_listings.get(vin))
+                         for listing, vin in pairs.items()
+                         if ((listing in known_pairs and known_pairs[listing] != vin)
+                             or (vin in known_vin_listings and known_vin_listings[vin] != listing))]
+            entry['identity_conflicts'] = conflicts
+            entry['overlapping_rows'] = sum(known_pairs.get(listing) == vin for listing, vin in pairs.items())
+            if conflicts:
+                raise CollectionStopped('Conflicting VIN/listing identity across plan queries')
             stage = 'storage_failure'
             entry['stored_rows'] = store_capture(destination/'vehicle.sqlite', run_id=run_id, page_number=number, raw_file=retained)
             entry.update(status='parsed', outcome_kind='success')
@@ -256,16 +298,34 @@ def _collect_search(*, filters, zip_code, destination, target_listings, budget, 
                 report['reason'] = '' if report['query_complete'] else 'Unique count differs from reported total'
                 if not report['query_complete']:
                     report['outcome_kind'] = 'pagination_unstable'
-            elif target_listings is not None and len(seen - known) >= target_listings:
+                    budget.stop()
+            elif ((target_listings is not None and len(seen - known) >= target_listings)
+                  or (target_vins is not None and len(vins - known_vins) >= target_vins)):
                 report.update(reason='Target reached; remaining query pages were not collected', outcome_kind='sample_limit')
+            checkpoint(entry)
+            if page_progress is not None:
+                page_progress(report, frame)
         except BaseException as exc:
             if not isinstance(exc, Exception):
                 interrupted = exc
-            if stage in {'access_failure', 'transport_failure', 'storage_failure', 'budget_exhausted'}:
-                budget.stop()
+            # Every unresolved source, identity, pagination or write failure ends
+            # this shared invocation; another query must not hide the failure.
+            budget.stop()
             reason = str(exc) if isinstance(exc, CollectionStopped) else f'{type(exc).__name__}: {stage}'
             report.update(status='blocked', reason=reason, outcome_kind=stage, query_complete=False)
             entry.update(error=reason, outcome_kind=stage)
+            if isinstance(exc, OSError):
+                # Local filesystem diagnostics survive the safe, short reason.
+                # Do not record arbitrary transport exception messages or headers.
+                entry['failure_details'] = dict(error_type=type(exc).__name__,
+                    errno=exc.errno, winerror=getattr(exc, 'winerror', None),
+                    filename=str(exc.filename) if exc.filename is not None else None,
+                    filename2=str(exc.filename2) if exc.filename2 is not None else None,
+                    operation=getattr(exc, 'storage_operation', stage),
+                    target=str(getattr(exc, 'storage_target', '')) or None,
+                    publication_attempts=getattr(exc, 'storage_publication_attempts', None),
+                    confirmed_sharing_winerror=getattr(exc, 'storage_sharing_violation', None),
+                    cleanup_notes=getattr(exc, '__notes__', []))
             if stage == 'storage_failure':
                 # A commit may already have happened. Never overwrite it as a failed
                 # capture; replay/idempotence checks or a new query attempt resolve it.
@@ -288,7 +348,9 @@ def _collect_search(*, filters, zip_code, destination, target_listings, budget, 
         checkpoint(entry)
         if interrupted is not None:
             raise interrupted
-        if report['status']=='blocked' or number==max(1, pages_total or 0) or (target_listings is not None and len(seen-known)>=target_listings):
+        if (report['status']=='blocked' or number==max(1, pages_total or 0)
+                or (target_listings is not None and len(seen-known)>=target_listings)
+                or (target_vins is not None and len(vins-known_vins)>=target_vins)):
             break
         number += 1
     return report

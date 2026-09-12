@@ -1,41 +1,28 @@
-# Run the daily Carvana inventory
+# Original seven-query daily inventory reference
 
-The daily command collects the seven fixed Tesla Model 3 year queries, saves their
+For routine review, selected populations and the proposed seven-date operation,
+start with the [operating guide](status_experiment.md). This reference describes
+the original Tesla configuration, its report tables, recovery and historical baseline.
+
+With its default configuration, the daily command collects seven fixed Tesla Model 3 year queries, saves their
 evidence, imports observations into SQLite, registers the date, and writes tables.
 Notebook 20 starts with those tables and remains offline/read-only. The first day
 is a baseline; it cannot tell us how many vehicles sold that day.
 
-## Daily review in five minutes
+## Review retained history
 
-1. Run the preview and, when you intend to collect for the actual local date,
-   the `--live` command under **Each day** below. Do not relabel an old capture.
-2. Open notebook 20 and Run All. Read the opening daily review, query coverage,
-   and explanation of whether a consecutive-day comparison is available.
-3. Read the matched-VIN asking-price categories, paired means and composition
-   tables. Check the actual start-to-start interval beside those results; a
-   consecutive-date comparison is not necessarily a 24-hour flow. Inspect new/absent VINs and the selected follow-up queue. Unresolved listings
-   can be up to date; the queue separately shows first checks and due rechecks.
-4. In notebook 20's vehicle-inspection section, copy a full retailer/VIN/listing identity into `SELECTED_IDENTITY`.
-   Rerun that cell to see its original URL and chronological evidence. When there
-   is no queue, choose a retained inventory control; it is not a sale candidate.
-5. After actually checking a page, fill `CHECK_DRAFT` in the optional manual-check section and rerun that
-   draft cell. Follow its
-   manual console steps to prepare, preview, save, and reread one record. Those
-   commands are Markdown examples, so Run All does not save anything.
+Open Notebook 20 and Run All using the settings in the operating guide. Edit
+`EXAMPLE_IDENTITY` to trace a retained retailer/VIN/listing and `ANALYSIS_CUTOFF`
+for historical replay. Its commented `RETAINED_CYCLES` pair demonstrates an offline
+source-only comparison without importing an experimental date.
 
-Preparation produces a stable record ID. Retry saving that same prepared record
-instead of preparing again. Corrections retain the original check time and use
-later availability; a new visit has a new check time. See
-[the recording guide](listing_checks.md). A historical cutoff will intentionally
-exclude newly saved evidence until you advance it.
+New browser checks use the [reserved batch workflow](browser_detail_batches.md).
+The optional [canonical check/review ledger](listing_checks.md) records a separate
+analyst interpretation of retained evidence. Preparing or saving that interpretation
+does not reserve another visit or replace its native capture.
 
-Review first disappearances, native changes and due rechecks, plus a few unchanged
-controls. Preserve exact wording, evidence references, and uncertainty. These
-targeted checks are a biased sample, not a measurement of population-wide sales.
-
-The separate [Sold-status notebook 22](../notebooks/22_carvana_sale_status_validation.ipynb)
-contains both frozen cohorts, explicit observation coverage, and experimental
-capture/import instructions. It does not write canonical checks or analyst reviews.
+Notebook 22 is the original 7+26-VIN legacy-capture reference. Later browser batches
+are reviewed in 23/24; they are not automatically added to 22's source selection.
 
 ## First real baseline: September 8, 2026
 
@@ -56,14 +43,14 @@ Open the [daily table](../data/analysis/carvana_daily/tables/20260909T014542Z-04
 [actual vehicle rows](../data/analysis/carvana_daily/tables/20260909T014542Z-04d2a2fa/vehicle_observations.csv),
 or [retained cycle](../data/experiments/carvana_daily/2026-09-08/cycle.json).
 Their first export manifest was verified against all source and output hashes.
-The next useful observation is September 9 at approximately 21:45 New York time.
+At that stage, September 9 at approximately 21:45 New York time was the next proposed observation.
 
 The [later page study](status_validation_20260908.md) checked five baseline listings
 that same evening. It did not create another daily snapshot. Notebook 20 now follows
 population/time, daily inventory, VIN changes, page evidence, and next steps. The
 older intraday walkthrough and coverage audits are preserved in notebook 21.
 
-## Each day
+## Original seven-query command
 
 Run from `C:\Users\Sean\VscProjects\researchOS`:
 
@@ -178,9 +165,10 @@ export from registered evidence, including a visible gap through today's cutoff:
 .\.venv\Scripts\python.exe -B vehicle/scripts/run_carvana_daily.py --refresh
 ```
 
-Opening notebook 20 requires neither command. It reads the register and existing
-database. The historical walkthrough uses its separate example database. To
-reproduce a prior cutoff, set `AS_OF_OVERRIDE` before running notebook code.
+Opening notebook 20 requires neither command. Its default reads the register and
+existing database. To reproduce a prior cutoff, edit ordinary `ANALYSIS_CUTOFF`.
+An explicit `RETAINED_CYCLES` selection reads those local cycles separately;
+`RETAINED_DATABASE = None` replays their source files without import.
 
 A registered partial date remains partial; `--live` will not replace it. Inspect
 the retained cycle and coverage diagnostics before any lower-level recovery in
@@ -227,18 +215,12 @@ Our first table adopts the useful date/inventory/pending/price structure. No ven
 values were imported, no workbook bytes changed, and its inventory/pending/price
 definitions are not assumed equivalent to our fixed pilot/native observations.
 
-## What to do next
+## Current next step
 
-1. Repeat once per day for 7-10 days, preserving the same population and similar
-   collection time. Check coverage, runtime, native fields and duplicate diagnostics.
-2. Review a small sample of missing/changed listings and unchanged controls in
-   the browser. Preserve outcomes, uncertainty and reappearances in the candidate
-   review ledger. This tests the absence screen instead of assuming it measures sales.
-3. Test a broader complete partition plan with its own history. Audit source totals,
-   overlap, geographic delivery context and pagination drift before claiming broad
-   daily inventory. The earlier 10,019-vehicle trial was a sample, not that proof.
-4. Only after sufficient independent labeled evidence, assess precision, missed
-   sales, observation lag and returns; then consider a separately labeled estimate.
-
-The first deliverable is a dependable daily inventory history. Exact vendor-style
-daily sales, orders and transaction ASP remain separate measurement problems.
+Use the offline examples and selected-population instructions in the
+[operating guide](status_experiment.md). Its fixed seven-date proposal supersedes
+the earlier 7–10-day Tesla collection suggestion. The original history and
+configuration remain available; a broader panel has its own register and database.
+Tests of inventory reliability, website-status outcomes and prospective quarterly
+accuracy remain separate. Exact daily sales, orders and transaction ASP are not
+established by the inventory tables.

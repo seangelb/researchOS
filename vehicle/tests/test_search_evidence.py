@@ -2,6 +2,7 @@
 import copy
 import hashlib
 import json
+import time
 from pathlib import Path
 from unittest.mock import Mock
 
@@ -160,7 +161,8 @@ def test_slow_checkpoint_cannot_shorten_actual_post_spacing(tmp_path, response_d
         changed['inventory']['pagination'].update(currentPage=2, totalMatchedInventory=28)
         return response(changed)
     collect_search(filters={}, zip_code='08542', destination=tmp_path/'query', post=post)
-    assert starts == [5.0, 8.0]
+    margin = time.get_clock_info('monotonic').resolution
+    assert starts == pytest.approx([5.0, 8.0 + margin])
 
 
 @pytest.mark.parametrize('failure', ['access', 'transport'])

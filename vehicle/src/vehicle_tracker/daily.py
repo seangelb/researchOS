@@ -197,7 +197,7 @@ def daily_tables(days, rows, *, as_of, timezone_name, followup_limit=20, checks=
     checks, reviews = select_checks(checks, as_of=as_of), select_reviews(reviews, as_of=as_of)
     evidence = dict(listing_checks=checks, selected_reviews=reviews)
     if not days.empty:
-        days = days.loc[pd.to_datetime(days.available_at, utc=True).le(cutoff)].copy()
+        days = days.loc[pd.to_datetime(days.available_at, utc=True, format='ISO8601').le(cutoff)].copy()
         rows = rows.loc[rows.cycle_id.isin(days.cycle_id)].copy()
     if days.empty:
         if not checks.empty or not reviews.empty:

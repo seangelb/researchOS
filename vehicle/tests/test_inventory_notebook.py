@@ -14,7 +14,9 @@ from vehicle_tracker.readiness import query_readiness
 def execute_loader(run_path, plan):
     notebook = json.loads((Path(__file__).parents[1] / "notebooks/10_carvana_inventory.ipynb").read_text(encoding="utf-8"))
     code = "".join(next(c["source"] for c in notebook["cells"] if c["id"] == "inventory-load"))
-    namespace = dict(RUN_PATH=run_path, plan=plan, Path=Path, hashlib=hashlib,
+    # This isolated cell test supplies its synthetic plan directly, without a config file.
+    namespace = dict(PLAN_PATH="<synthetic plan supplied in memory>", RUN_PATH=run_path,
+                     plan=plan, Path=Path, hashlib=hashlib,
                      json=json, pd=pd, query_readiness=query_readiness, display=lambda *_: None)
     exec(compile(code, "inventory-load", "exec"), namespace)
     return namespace

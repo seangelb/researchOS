@@ -35,12 +35,11 @@ def test_invalid_durable_budget_cannot_resume(tmp_path, response_data, clock, fi
 
 
 def test_clock_reversal_cannot_increase_cycle_time(tmp_path, response_data, clock, monkeypatch):
-    response_data['inventory']['vehicles'][0]['vin'] = 'invalid'
     post = Mock(return_value=reply(response_data))
     cycles.collect_cycle(plan(), **options(tmp_path), post=post)
     monkeypatch.setattr(cycles, 'utcnow', lambda: clock - timedelta(seconds=1))
     with pytest.raises(ValueError, match='clock precedes'):
-        cycles.collect_cycle(plan(), **options(tmp_path), resume=True, post=post)
+        cycles.CycleBudget(tmp_path/'cycle/cycle.json')
     assert post.call_count == 1
 
 

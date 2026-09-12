@@ -40,7 +40,7 @@ def run_all(monkeypatch, settings, *, as_of, scope=None):
 
     deny = Mock(side_effect=AssertionError('Run All attempted a mutation'))
     monkeypatch.chdir(VEHICLE)
-    with monkeypatch.context() as guarded, checker.offline_guards():
+    with checker.offline_guards(), monkeypatch.context() as guarded:
         guarded.setattr(builtins, 'open', guard_open(original_open))
         guarded.setattr(io, 'open', guard_open(original_io_open))
         for name in ['mkdir', 'write_text', 'write_bytes', 'replace', 'unlink']:
@@ -163,6 +163,34 @@ def test_alternate_retained_cycle_views_use_one_consistent_cutoff(
     assert len(scope['selected_vehicle']) == 1
     assert not scope['selected_vin_history'].empty
     assert not scope['manual_recording_allowed']
+
+
+@pytest.mark.parametrize('use_database', [False, True])
+def test_ordinary_retained_selection_reads_sources_without_operating_ledgers(
+        monkeypatch, tmp_path, settings, response_data, clock, use_database):
+    from vehicle_tracker.cycles import read_cycle_history
+
+    daily.run_tracking(settings, live=True, post=Mock(return_value=reply(response_data)))
+    entry = daily.registered_cycles(settings)[0]
+    _, expected = read_cycle_history([entry['path']], settings['database'] if use_database else None,
+                                    as_of='2026-09-08T23:00:00Z')
+    selected_book = book()
+    cell = next(c for c in selected_book['cells'] if c['id'] == 'daily-analyst-settings')
+    source = ''.join(cell['source']).replace(
+        'RETAINED_CYCLES = None', f"RETAINED_CYCLES = [{entry['path']!r}]")
+    if use_database:
+        source = source.replace('RETAINED_DATABASE = None', f"RETAINED_DATABASE = Path({str(settings['database'])!r})")
+    cell['source'] = source.splitlines(keepends=True)
+    monkeypatch.setitem(globals(), 'book', lambda: selected_book)
+    before = hashes(tmp_path)
+    scope = run_all(monkeypatch, settings, as_of='2026-09-08T23:00:00Z')
+    assert hashes(tmp_path) == before
+    assert 'CYCLE_REPORTS_OVERRIDE' not in scope and scope['EXPLICIT_CYCLE_SELECTION']
+    assert scope['DAILY_DATABASE'] == (settings['database'] if use_database else None)
+    columns = ['retailer', 'vin', 'listing_id', 'asking_price_usd']
+    pd.testing.assert_frame_equal(scope['daily_observations'][columns], expected[columns])
+    assert scope['check_history_input'].empty and scope['review_history'].empty
+    assert scope['collection_health'].empty and not scope['manual_recording_allowed']
 
 
 def test_explicit_cycle_selection_without_cutoff_does_not_use_old_hardcoded_date(

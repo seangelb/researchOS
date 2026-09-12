@@ -12,6 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / 'src'))
 from vehicle_tracker.sale_pilot import FORMAT, NATIVE, parse_capture, validate_cohort
 from vehicle_tracker.events import _aware
+from vehicle_tracker.detail_batch import write_new
 
 
 def import_captures(paths, cohort, *, root, now, save=False):
@@ -57,8 +58,8 @@ def import_captures(paths, cohort, *, root, now, save=False):
     manifest = dict(cohort_id=cohort['cohort_id'], cohort=cohort, available_at=now, captures=entries,
         method='browser-assisted public DOM/RSC projection; manual transfer/import',
         note='No inventory, canonical checks, reviews or transaction counts written.')
-    # Manifest is written last; incomplete imports are not discovered by the reader.
-    (folder / 'run.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
+    # Publish completion atomically; interrupted local writes remain undiscovered.
+    write_new(folder / 'run.json', manifest)
     return folder, rows
 
 

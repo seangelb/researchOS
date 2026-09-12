@@ -127,6 +127,61 @@ def test_real_seven_page_projection_replay(captures):
     assert rows[5]['purchaseType'] == 'Reservable'
 
 
+def test_synthetic_native_unavailable_is_preserved_without_claiming_a_sale(captures):
+    capture = deepcopy(captures[0])
+    details(capture).update(saleStatus='Unavailable', purchaseType='NotPurchasable', inventoryType='WIP')
+    capture.update(hero_text='This vehicle is no longer available', hero_badge=None, purchase_button='View Similar')
+    row = parse(capture)
+    assert row['parse_outcome'] == 'matched' and row['observed_status'] == 'unavailable'
+    assert row['saleStatus'] == 'Unavailable' and row['inventoryType'] == 'WIP'
+    assert row['purchaseType'] == 'NotPurchasable'
+    assert row['vin'] == capture['expected']['vin']
+
+
+@pytest.mark.parametrize('conflict', ['purchasable', 'reservable', 'missing_purchase', 'pending', 'ready', 'preorder', 'sold_ui'])
+def test_synthetic_native_unavailable_rejects_conflicting_eligibility_or_ui(captures, conflict):
+    capture = deepcopy(captures[0])
+    details(capture).update(saleStatus='Unavailable', purchaseType='NotPurchasable', inventoryType='WIP')
+    capture.update(hero_text='This vehicle is no longer available', hero_badge=None, purchase_button='View Similar')
+    if conflict in ['purchasable', 'reservable', 'missing_purchase']:
+        details(capture)['purchaseType'] = {'purchasable': 'Purchasable', 'reservable': 'Reservable', 'missing_purchase': None}[conflict]
+    elif conflict == 'pending':
+        capture['hero_badge'] = 'Purchase in progress'
+    elif conflict == 'ready':
+        capture['purchase_button'] = 'Get Started'
+    elif conflict == 'preorder':
+        capture['purchase_button'] = 'Pre-Order Now'
+    else:
+        capture['hero_badge'] = 'Sold'
+    assert parse(capture)['parse_outcome'] == 'conflicting_status'
+
+
+def test_synthetic_reservable_purchase_in_progress_is_pending_and_preserves_native_fields(captures):
+    capture = deepcopy(captures[2])
+    details(capture).update(saleStatus='Available', purchaseType='Reservable', inventoryType='WIP')
+    capture.update(hero_badge='Purchase in progress', purchase_button='Get Alerts',
+                   hero_text='Purchase in progress\nAnother customer is purchasing this vehicle')
+    row = parse(capture)
+    assert row['parse_outcome'] == 'matched' and row['observed_status'] == 'pending'
+    assert row['saleStatus'] == 'Available' and row['purchaseType'] == 'Reservable'
+    assert row['inventoryType'] == 'WIP' and row['purchase_button'] == 'Get Alerts'
+    assert row['hero_badge'] == 'Purchase in progress'
+
+
+@pytest.mark.parametrize('conflict', ['preorder_with_pending', 'not_purchasable_pending', 'ready_reservable'])
+def test_synthetic_reservable_pending_keeps_contradictory_ui_unresolved(captures, conflict):
+    capture = deepcopy(captures[2])
+    details(capture).update(saleStatus='Available', purchaseType='Reservable', inventoryType='WIP')
+    capture.update(hero_badge='Purchase in progress', purchase_button='Get Alerts', hero_text='Purchase in progress')
+    if conflict == 'preorder_with_pending':
+        capture['purchase_button'] = 'Pre-Order Now'
+    elif conflict == 'not_purchasable_pending':
+        details(capture)['purchaseType'] = 'NotPurchasable'
+    else:
+        capture.update(hero_badge=None, hero_text='Vehicle details', purchase_button='Get Started')
+    assert parse(capture)['parse_outcome'] == 'conflicting_status'
+
+
 @pytest.fixture
 def hold_captures():
     return json.loads((FIXTURE.parent / 'hold_projections_20260910_11.json').read_text(encoding='utf-8'))
@@ -487,7 +542,7 @@ def run_pilot_book(tmp_path, monkeypatch, cohorts, records=None, cutoff='2026-09
             return original(path, mode, *args, **kwargs)
         return read_only
     monkeypatch.chdir(tmp_path)
-    with monkeypatch.context() as guarded, checker.offline_guards():
+    with checker.offline_guards(), monkeypatch.context() as guarded:
         guarded.setattr(builtins, 'open', guard(builtins.open))
         guarded.setattr(io, 'open', guard(io.open))
         for name in ['mkdir', 'write_text', 'write_bytes', 'replace', 'unlink']:

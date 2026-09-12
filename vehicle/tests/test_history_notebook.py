@@ -1,7 +1,9 @@
 import copy
+from contextlib import closing
 import importlib.util
 import json
 from pathlib import Path
+import sqlite3
 
 import matplotlib.pyplot as plt
 plt.switch_backend('Agg')
@@ -18,8 +20,9 @@ checker=importlib.util.module_from_spec(spec)
 spec.loader.exec_module(checker)
 
 
-@pytest.mark.parametrize('scenario',['valid','missing','missing_source','partial','zero','failed_only'])
-def test_analysis_notebook_clean_kernel_paths(tmp_path,response_data,monkeypatch,scenario):
+@pytest.mark.parametrize('scenario',['valid','missing','missing_source','changed_price','missing_column',
+                                     'partial','zero','failed_only'])
+def test_analysis_notebook_clean_kernel_paths(tmp_path,response_data,monkeypatch,scenario,capsys):
     database=tmp_path/'analysis.sqlite'
     config=dict(database=str(database),reports=[],previous_reports=[],current_reports=[],collection_reports=[])
     if scenario!='missing':
@@ -28,19 +31,20 @@ def test_analysis_notebook_clean_kernel_paths(tmp_path,response_data,monkeypatch
             data['inventory']['vehicles']=[]
             data['inventory']['pagination'].update(totalMatchedInventory=0,totalMatchedPages=0)
         if scenario=='failed_only': data['userDeliveryInfo']['zip5']='90210'
+        if scenario=='partial':
+            # A real incomplete retained query: page 1 is admitted, but the mock
+            # repeats page 1 when page 2 is requested, so completeness is false.
+            data['inventory']['pagination'].update(totalMatchedInventory=27,totalMatchedPages=2)
         before=retained_query(tmp_path,data,'before')
         after=retained_query(tmp_path,data,'after')
         import_reports([before,after],database)
         config.update(previous_reports=[str(before)],current_reports=[str(after)])
         if scenario=='missing_source':
             Path(json.loads(before.read_text())['pages'][0]['retained_source']).unlink()
-        if scenario=='partial':
-            real=read_history
-            def incomplete(path):
-                runs,captures,rows=real(path)
-                runs.loc[:,'query_complete']=0
-                return runs,captures,rows
-            monkeypatch.setattr('vehicle_tracker.history.read_history',incomplete)
+        if scenario in ('changed_price','missing_column'):
+            with closing(sqlite3.connect(database)) as connection, connection:
+                connection.execute('UPDATE observations SET asking_price_usd=asking_price_usd+12345'
+                    if scenario=='changed_price' else 'ALTER TABLE observations DROP COLUMN asking_price_usd')
     scope={'CONFIG_OVERRIDE':config,'DATABASE_OVERRIDE':database,
            'CYCLE_REPORTS_OVERRIDE':[], 'RUN_TRACKING_VIEW_OVERRIDE':False}
     monkeypatch.chdir(ROOT/'vehicle')
@@ -55,6 +59,15 @@ def test_analysis_notebook_clean_kernel_paths(tmp_path,response_data,monkeypatch
         assert len(scope['stored_example'])==1
         assert scope['listing_changes'].asking_price_change_usd.eq(0).all()
     if scenario=='zero': assert scope['listing_changes'].empty
+    if scenario in ('missing_source','changed_price','missing_column'):
+        assert scope['history_validation_error']
+        assert scope['observations'].empty and scope['listing_changes'].empty
+        assert not scope['history_available']
+        assert 'BLOCKED RETAINED HISTORY:' in capsys.readouterr().out
+    if scenario=='partial':
+        assert scope['history_validation_error'] is None  # Valid partial evidence remains inspectable.
+        assert scope['query_runs'].query_complete.eq(0).all()
+        assert not scope['observations'].empty and scope['listing_changes'].empty
 
 
 @pytest.mark.parametrize('wrong_context',[False,True])

@@ -18,6 +18,7 @@ def main(argv=None):
     parser.add_argument('--plan',type=Path,default=ROOT/'config/carvana_search_queries.json')
     parser.add_argument('--experiment',default=datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%SZ'))
     parser.add_argument('--target-listings',type=int,default=1000)
+    parser.add_argument('--target-vins',type=int,help='One fresh trial targeting a distinct VIN union; no resume')
     parser.add_argument('--full-plan',action='store_true',help='Finish every query rather than a sample target')
     parser.add_argument('--max-requests',type=int,default=120)
     parser.add_argument('--max-seconds',type=float,default=1200)
@@ -29,6 +30,9 @@ def main(argv=None):
     parser.add_argument('--resume-cycle',action='store_true',help='Continue the SAME experiment/date and limits')
     parser.add_argument('--live',action='store_true')
     args=parser.parse_args(argv)
+    if args.target_vins is not None and (args.target_vins < 1 or args.full_plan or args.resume_from
+                                       or args.resume_cycle or args.cycle_date):
+        parser.error('--target-vins requires a positive target and a fresh sample; no resume or daily/full-plan options')
     if not re.fullmatch(r'[A-Za-z0-9_-]+',args.experiment) or args.target_listings < 1:
         parser.error('Use a plain experiment name and positive sample target')
     queries=json.loads(args.plan.read_text(encoding='utf-8'))['queries']
@@ -46,7 +50,8 @@ def main(argv=None):
         if args.resume_cycle or args.window_start or args.window_end:
             parser.error('Daily window/recovery options require --cycle-date')
         budget=NavigationBudget(args.max_requests,args.max_seconds)
-        preview=dict(mode='full_plan' if args.full_plan else 'sample',target=None if args.full_plan else args.target_listings,
+        preview=dict(mode='distinct_vin_trial' if args.target_vins else 'full_plan' if args.full_plan else 'sample',
+            target=args.target_vins if args.target_vins else None if args.full_plan else args.target_listings,
             max_requests=args.max_requests,max_seconds=args.max_seconds,resume_from=str(args.resume_from))
     print(json.dumps(dict(preview,plan=str(args.plan.resolve()),query_count=len(queries),destination=str(destination)),indent=2))
     if not args.live:
@@ -59,8 +64,9 @@ def main(argv=None):
         success=result['coverage_complete']
     else:
         result=collect_plan(queries,destination=destination,target_listings=args.target_listings,
-            budget=budget,resume_from=args.resume_from,full_plan=args.full_plan)
-        success=result['all_queries_complete'] or (not args.full_plan and result['target_reached'])
+            budget=budget,resume_from=args.resume_from,full_plan=args.full_plan,target_vins=args.target_vins)
+        success=(result['target_reached'] and not result.get('stopped') if args.target_vins else
+                 result['all_queries_complete'] or (not args.full_plan and result['target_reached']))
     print(json.dumps({key:value for key,value in result.items() if key not in {'queries','outcomes'}},indent=2))
     return 0 if success else 1
 

@@ -5,28 +5,101 @@ from pathlib import Path
 import sqlite3
 import os
 import tempfile
+import time
 
 import pandas as pd
 
 from vehicle_tracker.carvana import parse_capture
 
 
+_CHECKPOINT_RETRY_DELAYS = (0.05, 0.10, 0.20, 0.40)
+
+
+def _checkpoint_sharing_violation(error, source, destination):
+    """Identify Windows sharing denial without retrying general access failures.
+
+    MoveFileEx (used by os.replace) can report access denied, error 5, when an
+    open reader omits delete sharing. A DELETE-access handle probe distinguishes
+    that case: it must itself report sharing/lock violation 32/33. Opening and
+    closing this handle never deletes or changes either file or its permissions.
+    """
+    winerror = getattr(error, 'winerror', None)
+    if winerror in (32, 33):
+        return winerror
+    if os.name != 'nt' or winerror != 5:
+        return None
+    import ctypes
+    from ctypes import wintypes
+    kernel = ctypes.WinDLL('kernel32', use_last_error=True)
+    kernel.CreateFileW.argtypes = [wintypes.LPCWSTR, wintypes.DWORD, wintypes.DWORD,
+        wintypes.LPVOID, wintypes.DWORD, wintypes.DWORD, wintypes.HANDLE]
+    kernel.CreateFileW.restype = wintypes.HANDLE
+    kernel.CloseHandle.argtypes = [wintypes.HANDLE]
+    kernel.CloseHandle.restype = wintypes.BOOL
+    for path in (source, destination):
+        # DELETE access, share read/write/delete, OPEN_EXISTING, normal attributes.
+        handle = kernel.CreateFileW(str(Path(path).resolve()), 0x10000, 0x7, None, 3, 0x80, None)
+        if handle == wintypes.HANDLE(-1).value:
+            code = ctypes.get_last_error()
+            if code in (32, 33):
+                return code
+        else:
+            kernel.CloseHandle(handle)
+    return None
+
+
 def write_json_atomic(path, data):
-    """Publish a complete checkpoint; an interrupted write leaves the old one intact."""
+    """Atomically publish a checkpoint; only confirmed Windows sharing gets retries.
+
+    Retry the same fully written local temporary file at most four times, waiting
+    0.75 seconds in total. No source/network operation or request budget is retried.
+    A persistent error leaves the old checkpoint intact and is raised to the caller.
+    """
     path = Path(path)
     temporary = None
+    primary_error = None
+    operation, attempts = 'create_checkpoint_temporary', 0
     try:
         with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', dir=path.parent,
                                          prefix=path.name+'.', suffix='.tmp', delete=False) as stream:
             temporary = Path(stream.name)
+            operation = 'write_checkpoint_temporary'
             json.dump(data, stream, indent=2)
             stream.write('\n')
             stream.flush()
+            operation = 'sync_checkpoint_temporary'
             os.fsync(stream.fileno())
-        os.replace(temporary, path)
+        operation = 'replace_checkpoint'
+        for attempts, delay in enumerate((*_CHECKPOINT_RETRY_DELAYS, None), start=1):
+            try:
+                os.replace(temporary, path)
+                break
+            except OSError as error:
+                sharing = _checkpoint_sharing_violation(error, temporary, path)
+                error.storage_sharing_violation = sharing
+                if sharing is None or delay is None:
+                    raise
+                time.sleep(delay)
+    except BaseException as error:
+        primary_error = error
+        if isinstance(error, OSError):
+            error.storage_operation = operation
+            error.storage_target = str(path.resolve())
+            error.storage_publication_attempts = attempts
+        raise
     finally:
         if temporary is not None:
-            temporary.unlink(missing_ok=True)
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError as cleanup_error:
+                if primary_error is None:
+                    cleanup_error.storage_operation = 'remove_checkpoint_temporary'
+                    cleanup_error.storage_target = str(temporary)
+                    cleanup_error.storage_publication_attempts = 1
+                    raise
+                # Preserve the publication error and its diagnostics if a locked
+                # temporary file also cannot be removed. Never erase the old file.
+                primary_error.add_note(f'Checkpoint temporary cleanup also failed: {cleanup_error}')
 
 
 def retain_bytes(content: bytes, raw_directory: Path, *, suffix: str = '.bin') -> Path:
@@ -37,6 +110,13 @@ def retain_bytes(content: bytes, raw_directory: Path, *, suffix: str = '.bin') -
     raw_directory = Path(raw_directory)
     raw_directory.mkdir(parents=True, exist_ok=True)
     path = raw_directory / f'{digest}{suffix}'
+    # Fixed daily destinations can fit Windows' ordinary path limit while the
+    # 64-character content hash does not. Prefix only that long final filename;
+    # keep config, query, checkpoint and SQLite paths in their existing form.
+    if os.name == 'nt' and len(str(path.resolve())) >= 260:
+        absolute = str(path.resolve())
+        if not absolute.startswith('\\\\?\\'):
+            path = Path('\\\\?\\UNC\\' + absolute[2:] if absolute.startswith('\\\\') else '\\\\?\\' + absolute)
     if path.exists():
         if path.read_bytes() != content:
             raise ValueError('Retained capture content mismatch')

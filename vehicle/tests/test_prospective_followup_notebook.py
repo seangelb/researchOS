@@ -19,7 +19,8 @@ def rerun_selection(scope, **overrides):
     scope = dict(scope, **overrides)
     cells = {c['id']: ''.join(c['source']) for c in json.loads(BOOK.read_text(encoding='utf-8'))['cells']}
     with checker.offline_guards():
-        for identifier in ['pilot-settings', 'prospective-followup-plan']:
+        for identifier in ['pilot-analyst-settings', 'pilot-settings', 'prospective-followup-plan',
+                           'prospective-followup-eligibility', 'prospective-followup-selection']:
             exec(compile(cells[identifier], identifier, 'exec'), scope)
     return scope
 

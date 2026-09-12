@@ -7,6 +7,9 @@ command. Each detail batch has a frozen selection, a short collection window and
 one checkpoint per planned vehicle. It does not create another database.
 
 Run the commands below from `C:\Users\Sean\VscProjects\researchOS`.
+Use the [operating guide](status_experiment.md) to choose the inventory population
+or frozen study before preparing a batch. This page owns the shared visit steps
+for new browser checks, including checks later described in an analyst ledger.
 
 ## Preview and prepare
 
@@ -30,6 +33,34 @@ Chrome may fetch additional page assets; the visit cap is not a network request
 count. A reserved, unresolved vehicle is excluded from fresh selections until
 its earlier visit is recovered or explicitly closed, even after that batch expires.
 
+Every `next` also enforces a shared limit of **12 started browser visits in the
+preceding 24 hours**, across all sibling directories under
+`data/experiments/carvana_detail_batches`. Failed and unresolved visits consume
+that budget. Midnight and a new batch name do not reset it. Previews print the
+remaining budget and earliest possible next start; there is no command-line
+option to raise the limit. Existing observations are preserved even if they were
+collected before this limit was introduced.
+
+One unresolved visit stops new starts for every VIN and batch until it is
+recovered or explicitly failed. The 15-second pause after a saved result also
+applies across batches. A shared `.reservation.lock` serializes starts. If a
+process crashes and leaves that file, inspect its recorded owner and verify that
+the process has terminated before manually recovering the lock; the collector
+never clears it automatically. Recording/recovering existing evidence does not
+consume another start and remains possible when the budget is exhausted.
+
+An `access_blocked` result pauses **all** browser batches for 24 hours after that
+check, with no override or change of transport. An ordinary recorded interruption
+or navigation failure still consumes a start, but does not impose this access
+challenge cooldown. New starts must use the shared batch directory; copying a
+batch elsewhere does not provide another CLI budget.
+
+These controls enforce this workflow's retained reservations. They cannot count
+or prevent pages opened directly in Chrome outside `next`; manual navigation is
+not an alternative way to bypass the collection budget. Inventory requests have
+their own separate retained budget, and Chrome asset requests are not counted as
+top-level detail visits.
+
 ## Read and save one page at a time
 
 1. Reserve the next visit **before** opening its page:
@@ -41,11 +72,23 @@ its earlier visit is recovered or explicitly closed, even after that batch expir
    This prints the exact URL, expected VIN/listing identity, visit directory and
    frozen `capture.js` path. A second `next` cannot repeat an unresolved visit.
 
-2. Open that URL in connected Chrome. Read the public page, then use the frozen
-   extractor with the printed identity. Save its returned projection as a JSON
-   file in a separate temporary location. The extraction contract is documented
-   in [capture_carvana_page.js](../scripts/capture_carvana_page.js); keep the
-   returned native fields and physical `checked_at` together.
+2. Open the reserved URL in Chrome. For a manual session, open **DevTools Console**
+   with **Ctrl+Shift+J**. Read the public page and paste the function from the
+   exact frozen `capture.js` path printed by `next`. Use that batch's copy rather
+   than a newer script from the repository. Then run the following with the
+   printed VIN and listing ID:
+
+   ```javascript
+   copy(JSON.stringify(captureCarvanaPage({vin: 'EXPECTED_VIN', listing_id: 'EXPECTED_LISTING_ID'}), null, 2))
+   ```
+
+   Chrome's `copy` command puts the returned projection on the clipboard. Paste
+   it into a new UTF-8 `.json` file in a separate temporary location. If using an
+   assisted connected-Chrome session, retain the same function result and identity.
+   The extractor reads the loaded page and makes no extra requests. Its contract
+   is documented in [capture_carvana_page.js](../scripts/capture_carvana_page.js).
+   Preserve the native fields and physical `checked_at`; do not substitute the
+   later time when the JSON is saved or imported.
 
 3. Record that file immediately:
 
@@ -102,7 +145,7 @@ Do not delete a checkpoint or reopen its URL to make the old batch look complete
 | 2 | At least one unsuccessful visit; the batch stopped |
 | 3 | Unfinished work after the collection window expired |
 
-## Review in Notebook 23
+## Review the saved results
 
 Run [Notebook 23](../notebooks/23_carvana_daily_sales_research.ipynb) from the top.
 Choose an `AS_OF` at or after the saved result's availability to include it.
@@ -114,6 +157,12 @@ Browser observations feed follow-up selection and the optional Clarity compariso
 They do not silently change the frozen cohort's original inputs or estimates.
 Missing, pending and native Sold remain distinct observations. A website Sold
 label does not establish delivery, final transaction price or sales net of returns.
+
+For a frozen status study, use Notebook 24 with its selected `STUDY` and cutoff.
+Notebook 22 remains the original legacy-capture reference; its reader does not
+include these newer browser batches. A later check can therefore appear in 23/24
+without changing the freshness displayed in 22. Canonical checks and analyst
+reviews also remain separate records, not automatic copies of native captures.
 
 ## September 12 validation
 

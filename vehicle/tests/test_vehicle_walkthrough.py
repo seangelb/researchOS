@@ -17,12 +17,14 @@ NOTEBOOK = VEHICLE / 'notebooks/00_source_walkthrough.ipynb'
 def execute(start, monkeypatch, alter=None):
     monkeypatch.chdir(start)
     scope = {}
+    if alter:
+        # Alter the synthetic input when it is read, independently of cell positions.
+        read_csv = pd.read_csv
+        monkeypatch.setattr(pd, 'read_csv', lambda *args, **kwargs: alter(read_csv(*args, **kwargs)))
     with checker.offline_guards():
         for index, cell in enumerate(json.loads(NOTEBOOK.read_text(encoding='utf-8'))['cells']):
             if cell['cell_type'] == 'code':
                 exec(''.join(cell['source']), scope)
-                if index == 1 and alter:
-                    scope['observed'] = alter(scope['observed'])
     return scope
 
 

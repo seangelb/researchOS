@@ -1,0 +1,89 @@
+{
+  "description": "Fixed 2023 four-model research panel; ZIP 08542; location filtering disabled; not representative of national sales. Retain all returned native inventory types. Complete all four queries before comparisons.",
+  "queries": [
+    {
+      "query_id": "tesla_model3_2023",
+      "zip_code": "08542",
+      "filters": {
+        "makes": [
+          {
+            "name": "Tesla",
+            "parentModels": [
+              {
+                "name": "Model 3"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "min": 2023,
+          "max": 2023
+        }
+      },
+      "location_filter": false
+    },
+    {
+      "query_id": "chevrolet_equinox_2023",
+      "zip_code": "08542",
+      "location_filter": false,
+      "filters": {
+        "makes": [
+          {
+            "name": "Chevrolet",
+            "parentModels": [
+              {
+                "name": "Equinox"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "min": 2023,
+          "max": 2023
+        }
+      }
+    },
+    {
+      "query_id": "ford_escape_2023",
+      "zip_code": "08542",
+      "location_filter": false,
+      "filters": {
+        "makes": [
+          {
+            "name": "Ford",
+            "parentModels": [
+              {
+                "name": "Escape"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "min": 2023,
+          "max": 2023
+        }
+      }
+    },
+    {
+      "query_id": "toyota_corolla_2023",
+      "zip_code": "08542",
+      "location_filter": false,
+      "filters": {
+        "makes": [
+          {
+            "name": "Toyota",
+            "parentModels": [
+              {
+                "name": "Corolla"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "min": 2023,
+          "max": 2023
+        }
+      }
+    }
+  ]
+}

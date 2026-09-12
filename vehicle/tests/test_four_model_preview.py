@@ -53,12 +53,15 @@ def test_actual_expansion_cli_preview_has_no_requests_or_files(monkeypatch, caps
             return original(path, mode, *args, **kwargs)
         return guarded
     deny = Mock(side_effect=AssertionError('Preview attempted a mutation'))
-    with monkeypatch.context() as guarded, checker.offline_guards():
+    original_functions = (builtins.open, io.open, Path.mkdir, Path.unlink, Path.replace)
+    # Undo the inner test patches before the outer notebook guards restore originals.
+    with checker.offline_guards(), monkeypatch.context() as guarded:
         guarded.setattr(builtins, 'open', readonly(builtins.open))
         guarded.setattr(io, 'open', readonly(io.open))
         for method in ['mkdir', 'write_text', 'write_bytes', 'replace', 'unlink']:
             guarded.setattr(Path, method, deny)
         assert cli.main(['--config', str(CONFIG)]) == 0
+    assert (builtins.open, io.open, Path.mkdir, Path.unlink, Path.replace) == original_functions
     assert not deny.called
     assert before == {p for key in fields for p in [settings[key], *settings[key].rglob('*')] if p.exists()}
     output = capsys.readouterr().out

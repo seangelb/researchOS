@@ -66,7 +66,18 @@ def test_cycle_cutoff_does_not_reuse_later_retry(tmp_path, response_data, clock,
         @staticmethod
         def now(tz=None): return later
     monkeypatch.setattr('vehicle_tracker.search.datetime', Later)
-    cycles.collect_cycle(plan(), **args, resume=True, post=post)
+    # Current collectors stop on invalid identity. Assemble the later retained
+    # attempt explicitly to exercise historical-cutoff reading of legacy retries,
+    # without using or reopening the stopped cycle's live admission path.
+    with pytest.raises(ValueError, match='Cycle stopped'):
+        cycles.collect_cycle(plan(), **args, resume=True, post=post)
+    from vehicle_tracker.search import collect_search
+    collect_search(filters={}, zip_code='08542', destination=path.parent/'attempt_0002/all',
+                   post=Mock(return_value=reply(response_data)))
+    state = json.loads(path.read_text())
+    state['attempts'].append('attempt_0002')
+    state['budget']['requests'] += 1
+    path.write_text(json.dumps(state))
     cycles.import_cycle(path, database)
     after = cycles.read_cycle_history([path], database, as_of=cutoff)
     for actual, expected in zip(after, before):
@@ -124,12 +135,19 @@ def test_readiness_failed_empty_and_changed_source(tmp_path, response_data, cloc
 
 def test_readiness_exposes_same_vin_under_different_listings(tmp_path, response_data, clock):
     from vehicle_tracker.readiness import query_readiness
+    from vehicle_tracker.search import collect_search
     queries = [dict(query_id=name, zip_code='08542', filters={'year':{'min':year,'max':2030}})
                for name, year in [('A',2000),('B',2001)]]
     second = copy.deepcopy(response_data)
     for vehicle in second['inventory']['vehicles']: vehicle['vehicleId'] += 100000
-    cycles.collect_cycle(queries, **options(tmp_path), post=Mock(side_effect=[reply(response_data), reply(second)]))
-    paths = [tmp_path/f'cycle/attempt_0001/{name}/run_report.json' for name in ['A','B']]
+    # Independent historical query captures can disagree. Today's shared trial
+    # stops this conflict, while readiness must still diagnose retained old inputs.
+    paths = []
+    for query, payload in zip(queries, [response_data, second]):
+        folder = tmp_path/query['query_id']
+        collect_search(filters=query['filters'], zip_code=query['zip_code'], destination=folder,
+                       post=Mock(return_value=reply(payload)))
+        paths.append(folder/'run_report.json')
     table, memberships = query_readiness(dict(population='synthetic partitions', queries=queries), paths)
     assert table.query_complete.all() and len(memberships) == 6
     assert table.conflicting_vins.tolist() == [3, 3]

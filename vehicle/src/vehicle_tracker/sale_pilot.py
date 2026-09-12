@@ -165,22 +165,27 @@ def parse_capture(capture, *, expected, available_at, source):
     ui_unavailable = 'This vehicle is no longer available' in lines
     if (sum([ui_sold, ui_pending, ui_ready, ui_preorder]) > 1
             or (sale == 'Sold' and (purchase in ['Purchasable', 'Reservable'] or ui_pending or ui_ready or ui_preorder))
+            or (sale == 'Unavailable' and (purchase != 'NotPurchasable' or ui_pending or ui_ready or ui_preorder))
             or (ui_sold and sale != 'Sold')
-            or ((ui_ready or ui_pending) and (purchase != 'Purchasable' or ui_unavailable))
+            or (ui_ready and (purchase != 'Purchasable' or ui_unavailable))
+            or (ui_hold and purchase != 'Purchasable')
+            or (ui_pending and (purchase not in ['Purchasable', 'Reservable'] or ui_unavailable))
             or (ui_preorder and purchase != 'Reservable')):
         item.update(parse_outcome='conflicting_status')
         return item
     item['parse_outcome'] = 'matched'
     if sale == 'Sold':
         item['observed_status'] = 'sold_label'
+    elif sale == 'Unavailable' and purchase == 'NotPurchasable':
+        item['observed_status'] = 'unavailable'
     elif sale == 'Available' and purchase == 'NotPurchasable':
         item['observed_status'] = 'unavailable'
-    elif sale == 'Available' and purchase == 'Purchasable':
+    elif sale == 'Available' and purchase in ['Purchasable', 'Reservable']:
         if ui_pending:
             item['observed_status'] = 'pending'
         elif button == 'Get Started':
             item['observed_status'] = 'available'
-    if sale not in ['Sold', 'Available'] or purchase not in [None, 'NotPurchasable', 'Purchasable', 'Reservable']:
+    if sale not in ['Sold', 'Available', 'Unavailable'] or purchase not in [None, 'NotPurchasable', 'Purchasable', 'Reservable']:
         item.update(parse_outcome='unrecognized_status', observed_status='unknown')
     return item
 
@@ -257,11 +262,12 @@ def load_selection_plan(path, *, as_of):
     return result
 
 
-def load_research_pass(report_path, selected, cohorts, *, as_of):
+def load_research_pass(report_path, selected, cohorts, *, as_of, membership_as_of=None):
     """Validate a diagnostic pass against its independently loaded selection plan.
 
     Return no report or observations before report availability. Cohort flags are
-    checked against frozen membership; validation-only vehicles stay separate.
+    checked when selection was frozen, or at the explicit browser-batch creation
+    clock. A later cohort cannot change an earlier pass's classification.
     """
     report_path = Path(report_path)
     report = json.loads(report_path.read_text(encoding='utf-8'))
@@ -274,7 +280,10 @@ def load_research_pass(report_path, selected, cohorts, *, as_of):
     if not (selected.selected_at.eq(selection_at) & selected.available_at.le(available_at)).all():
         raise ValueError('Pass and selection plan clocks differ')
     expected_rows = selected.set_index(['retailer', 'vin', 'listing_id'])
-    members = {(v['retailer'], v['vin']) for c in known_disjoint_cohorts(cohorts, as_of=as_of)
+    membership_at = selection_at if membership_as_of is None else _aware(membership_as_of)
+    if not selection_at <= membership_at <= available_at:
+        raise ValueError('Frozen membership clock must follow selection and precede pass availability')
+    members = {(v['retailer'], v['vin']) for c in known_disjoint_cohorts(cohorts, as_of=membership_at)
         for v in c['vehicles']}
     rows, seen = [], set()
     for entry in report['captures']:

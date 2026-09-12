@@ -55,6 +55,101 @@ def test_complete_cycle_root_import_is_idempotent_and_read_only(tmp_path, respon
     assert len(vin_events(days,rows)) == 3
 
 
+@pytest.mark.parametrize('empty', [False, True])
+def test_source_cycle_reader_matches_import_without_reading_sqlite(tmp_path, response_data, clock, monkeypatch, empty):
+    if empty:
+        response_data['inventory']['vehicles'] = []
+        response_data['inventory']['pagination'].update(totalMatchedInventory=0, totalMatchedPages=0)
+    cycles.collect_cycle(plan(), **options(tmp_path), post=Mock(return_value=reply(response_data)))
+    path, database = tmp_path/'cycle/cycle.json', tmp_path/'history.sqlite'
+    cycles.import_cycle(path, database)
+    expected = cycles.read_cycle_history([path], database)
+    before = {p: p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()}
+    monkeypatch.setattr(cycles, 'read_history', Mock(side_effect=AssertionError('No database read')))
+    actual = cycles.read_cycle_history([path])
+    for result, reference in zip(actual, expected):
+        pd.testing.assert_frame_equal(result, reference, check_dtype=False, check_exact=True)
+    assert actual[0].coverage_complete.all()
+    assert actual[1].empty == empty
+    if not empty:
+        assert actual[1].source_path.map(lambda source: Path(source).is_file()).all()
+    assert {p: p.read_bytes() for p in tmp_path.rglob('*') if p.is_file()} == before
+
+
+@pytest.mark.parametrize('gap', ['unattempted', 'outside_window'])
+def test_source_cycle_reader_keeps_incomplete_coverage(tmp_path, response_data, clock, monkeypatch, gap):
+    queries, args = plan(), options(tmp_path)
+    if gap == 'unattempted':
+        queries.append(dict(query_id='next', zip_code='08542', filters={'year': {'min': 2025, 'max': 2025}}))
+        args['max_requests'] = 1
+    else:
+        class Yesterday:
+            @staticmethod
+            def now(tz=None): return clock - timedelta(days=1)
+        monkeypatch.setattr('vehicle_tracker.search.datetime', Yesterday)
+    cycles.collect_cycle(queries, **args, post=Mock(return_value=reply(response_data)))
+    days, rows = cycles.read_cycle_history([tmp_path/'cycle/cycle.json'])
+    assert not days.coverage_complete.any()
+    assert len(rows) == (3 if gap == 'unattempted' else 0)
+    assert ('No attempted query' if gap == 'unattempted' else 'window') in days.coverage_reason.iloc[0]
+
+
+def test_source_cycle_reader_honors_creation_and_delayed_availability(tmp_path, response_data, clock):
+    cycles.collect_cycle(plan(), **options(tmp_path), post=Mock(return_value=reply(response_data)))
+    path = tmp_path/'cycle/cycle.json'
+    days, rows = cycles.read_cycle_history([path], as_of=(clock-timedelta(seconds=1)).isoformat())
+    assert days.empty and rows.empty
+    report_path = path.parent/'attempt_0001/all/run_report.json'
+    report = json.loads(report_path.read_text())
+    later = (clock+timedelta(minutes=1)).isoformat()
+    report['pages'][0]['evidence_available_at_utc'] = later
+    report_path.write_text(json.dumps(report))
+    early, rows = cycles.read_cycle_history([path], as_of=clock.isoformat())
+    assert not early.coverage_complete.any() and rows.empty
+    complete, rows = cycles.read_cycle_history([path], as_of=later)
+    assert complete.coverage_complete.all() and len(rows) == 3
+    assert complete.available_at.tolist() == [later]
+
+
+def test_source_cycle_reader_preserves_cutoff_when_identity_failure_blocks_retry(tmp_path, response_data, clock, monkeypatch):
+    broken = copy.deepcopy(response_data)
+    broken['inventory']['vehicles'][0]['vin'] = 'bad'
+    post = Mock(side_effect=[reply(broken), reply(response_data)])
+    args = options(tmp_path)
+    cycles.collect_cycle(plan(), **args, post=post)
+    path = tmp_path/'cycle/cycle.json'
+    cutoff = (clock+timedelta(seconds=1)).isoformat()
+    before = cycles.read_cycle_history([path], as_of=cutoff)
+    later = clock+timedelta(minutes=2)
+    monkeypatch.setattr(cycles, 'utcnow', lambda: later)
+    class Later:
+        @staticmethod
+        def now(tz=None): return later
+    monkeypatch.setattr('vehicle_tracker.search.datetime', Later)
+    with pytest.raises(ValueError, match='Cycle stopped'):
+        cycles.collect_cycle(plan(), **args, resume=True, post=post)
+    after = cycles.read_cycle_history([path], as_of=cutoff)
+    for result, reference in zip(after, before):
+        pd.testing.assert_frame_equal(result, reference)
+    assert not after[0].coverage_complete.any() and after[1].empty
+    days, rows = cycles.read_cycle_history([path], as_of=later.isoformat())
+    assert not days.coverage_complete.any() and rows.empty
+    assert post.call_count == 1
+
+
+@pytest.mark.parametrize('source_kind', ['projection', 'response'])
+def test_source_cycle_reader_rejects_modified_retained_source(tmp_path, response_data, clock, source_kind):
+    cycles.collect_cycle(plan(), **options(tmp_path), post=Mock(return_value=reply(response_data)))
+    path = tmp_path/'cycle/cycle.json'
+    report = json.loads((path.parent/'attempt_0001/all/run_report.json').read_text())
+    page = report['pages'][0]
+    source = Path(page['retained_source'] if source_kind == 'projection'
+                  else page['response_evidence']['source_path'])
+    source.write_bytes(source.read_bytes()+b'\n')
+    with pytest.raises(ValueError, match='[Hh]ash'):
+        cycles.read_cycle_history([path])
+
+
 def test_full_mode_does_not_stop_at_sample_target(tmp_path, response_data, clock):
     first = copy.deepcopy(response_data)
     first['inventory']['vehicles'] = [dict(first['inventory']['vehicles'][0], vehicleId=100+i, vin=f'{i:017}') for i in range(24)]
@@ -195,27 +290,26 @@ def test_empty_daily_reader_runs_notebook_cells(tmp_path,response_data,clock,mon
     assert scope['daily_summary'].observed_vins.iloc[0] == 0
 
 
-def test_partial_restart_budget_and_spacing_persist(tmp_path,response_data,clock,monkeypatch):
-    bad=copy.deepcopy(response_data)
-    bad['inventory']['vehicles'][0]['vin']='invalid'
-    post=Mock(side_effect=[reply(bad),reply(response_data)])
+def test_restored_budget_and_spacing_persist(tmp_path,response_data,clock,monkeypatch):
+    post=Mock(return_value=reply(response_data))
     first=cycles.collect_cycle(plan(),**options(tmp_path),post=post)
     assert first['budget']['requests']==1 and not first['budget']['stopped']
     sleeps=[]
     monkeypatch.setattr('vehicle_tracker.collect.time.sleep',sleeps.append)
-    second=cycles.collect_cycle(plan(),**options(tmp_path),resume=True,post=post)
-    assert second['coverage_complete'] and second['budget']['requests']==2
+    restored=cycles.CycleBudget(tmp_path/'cycle/cycle.json')
+    restored.before_navigation()
+    assert restored.requests == 2
+    assert json.loads((tmp_path/'cycle/cycle.json').read_text())['budget']['requests'] == 2
     assert sleeps and sleeps[0] > 2.9
 
 
 def test_cumulative_limit_cannot_be_reset_by_resume(tmp_path,response_data,clock):
-    response_data['inventory']['vehicles'][0]['vin']='invalid'
     args=options(tmp_path)
     args['max_requests']=1
     post=Mock(return_value=reply(response_data))
     cycles.collect_cycle(plan(),**args,post=post)
     with pytest.raises(ValueError,match='budget exhausted'):
-        cycles.collect_cycle(plan(),**args,resume=True,post=post)
+        cycles.CycleBudget(tmp_path/'cycle/cycle.json').before_navigation()
     assert post.call_count==1
 
 
@@ -304,7 +398,7 @@ def test_cycle_preserves_failure_without_observation_clock(tmp_path, response_da
     assert coverage.reason.iloc[0] == native['reason']
     assert not coverage.within_window.any() and not state['coverage_complete']
     assert post.call_count == state['budget']['requests'] == 1
-    assert state['budget']['stopped'] == (failure != 'parser')
+    assert state['budget']['stopped']
 
 
 def test_resume_stale_completed_query_still_blocks(tmp_path, response_data, clock, monkeypatch):

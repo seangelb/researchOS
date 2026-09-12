@@ -4,6 +4,12 @@ Inventory observations, website checks, and analyst conclusions are three differ
 tables. The daily command and notebook 20 combine them at a chosen evidence cutoff.
 They do not turn a disappearing VIN or a website label into a confirmed sale.
 
+This is the reference for analyst-supplied check and review records. For routine
+review and population selection, use the [operating guide](status_experiment.md).
+For every new browser visit, use the [reserve/capture/record workflow](browser_detail_batches.md)
+first. A canonical check is a separate interpretation of retained evidence; it
+does not replace the browser reservation or its native capture.
+
 ## Notebook entry without a JSON file
 
 Notebook 20 sections 5 and 6 now provide selection, an editable `CHECK_DRAFT`, and
@@ -32,10 +38,11 @@ Alternative-cycle and synthetic notebook examples do not enable manual recording
 
 ## 1. Check a listing and save the evidence
 
-Start with `detail_followups` in notebook 20. Open its original listing URL manually
-and retain the actual evidence, such as a screenshot or saved page. Checks may start
-at the first disappearance; there is no need to wait for a three-day candidate.
-An unchanged listing from the inventory table can also be checked as a control.
+Start with `detail_followups` in notebook 20. New visits must be selected and
+reserved through the browser batch workflow before opening their URL. Record the
+native projection there, then use its retained evidence for an optional canonical
+check below. Already-retained evidence needs no new visit. First disappearances
+and unchanged controls are different sampling reasons; neither establishes a sale.
 
 Create a UTF-8 JSON file such as `check.json`. This is a template: replace the
 placeholders with real observed evidence. The program does not create this record

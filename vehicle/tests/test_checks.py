@@ -225,6 +225,7 @@ def test_notebook_and_command_share_saved_checks_reviews_and_cutoff(settings, mo
         TRACKING_CONFIG_OVERRIDE=settings['config_path'], AS_OF_OVERRIDE=cutoff)
     code = daily_code()
     with checker.offline_guards():
+        exec(code['daily-analyst-settings'], scope)
         exec(code['daily-operating-view'], scope)
         scope.update(daily_settings=settings, daily_cycles=days, daily_observations=rows, AS_OF=cutoff)
         exec(code['daily-operating-tables'], scope)
@@ -233,6 +234,7 @@ def test_notebook_and_command_share_saved_checks_reviews_and_cutoff(settings, mo
             pd.testing.assert_frame_equal(frame, scope['tracking_tables'][name])
         pd.testing.assert_frame_equal(scope['sale_candidate_rows'], command_tables['sale_candidates'])
         scope['SALES_REVIEWS_OVERRIDE'] = []
+        exec(code['daily-analyst-settings'], scope)
         exec(code['daily-operating-view'], scope)
         exec(code['daily-operating-tables'], scope)
         exec(code['sale-review-data'], scope)

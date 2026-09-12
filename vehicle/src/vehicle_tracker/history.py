@@ -90,10 +90,9 @@ def _source_less_checkpoint(report_path, report, page):
         if not reserved or any(pd.isna(value) or value.tzinfo is None for value in clocks) or clocks != sorted(clocks):
             raise ValueError('Reserved checkpoint lacks valid request clocks')
     journal = json.loads((report_path.parent / 'attempts' / f"{page['page']:04d}.json").read_text(encoding='utf-8'))
-    request = dict(filters=report['filters'], pagination=dict(page=page['page'], pageSize=24),
-                   sortBy='MostPopular', zip5=report['zip_code'])
-    if report.get('location_filter', False):
-        request['requestedFeatures'] = ['LocationBasedPrefiltering']
+    from vehicle_tracker.search import build_search_request
+    request = build_search_request(filters=report['filters'], zip_code=report['zip_code'],
+                                   page=page['page'], location_filter=report.get('location_filter', False))
     if journal != dict(run_id=report['run_id'], request=request, **page):
         raise ValueError('Checkpoint journal differs from query run, attempt, page or context')
     return page['outcome_kind']
@@ -283,16 +282,25 @@ def read_history(database, *, run_ids=None):
         connection.close()
 
 
+def _comparison_clock(value):
+    """Invalid or timezone-free evidence must fail the gate, never become UTC."""
+    try:
+        stamp = pd.Timestamp(value)
+    except (TypeError, ValueError, OverflowError):
+        return pd.NaT
+    return stamp if pd.notna(stamp) and stamp.tzinfo is not None else pd.NaT
+
+
 def comparison_checks(runs, previous_ids, current_ids):
     """One visible row per coverage rule. False means absence comparisons are blocked."""
     previous = runs[runs.run_id.isin(previous_ids)]
     current = runs[runs.run_id.isin(current_ids)]
     known = (len(previous_ids)==len(set(previous_ids))==len(previous)>0
              and len(current_ids)==len(set(current_ids))==len(current)>0)
-    start = pd.to_datetime(current.observation_start,utc=True,errors='coerce')
-    end = pd.to_datetime(previous.observation_end,utc=True,errors='coerce')
-    previous_start = pd.to_datetime(previous.observation_start,utc=True,errors='coerce')
-    current_end = pd.to_datetime(current.observation_end,utc=True,errors='coerce')
+    start = pd.to_datetime(current.observation_start.map(_comparison_clock),utc=True)
+    end = pd.to_datetime(previous.observation_end.map(_comparison_clock),utc=True)
+    previous_start = pd.to_datetime(previous.observation_start.map(_comparison_clock),utc=True)
+    current_end = pd.to_datetime(current.observation_end.map(_comparison_clock),utc=True)
     checks = [
         ('selection',known,'Choose nonempty, known, unique query-run IDs'),
         ('complete',known and previous.query_complete.eq(1).all() and current.query_complete.eq(1).all(), 'All requested queries must be complete'),

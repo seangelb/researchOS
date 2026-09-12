@@ -138,10 +138,16 @@ class CycleBudget(NavigationBudget):
 
 def cycle_evidence(path, *, as_of=None):
     """Return cycle metadata, every requested query's coverage, and all attempt reports."""
+    return _read_cycle_evidence(path, as_of=as_of)[:3]
+
+
+def _read_cycle_evidence(path, *, as_of=None):
+    """Keep verified source rows with coverage for reuse within this read only."""
     path = Path(path).resolve()
     state = _cycle_state(path)
     cutoff = aware(as_of) if as_of is not None else None
     selected, reports, reported_requests = {}, [], 0
+    replayed = {}
     for index, attempt in enumerate(state['attempts'], 1):
         if attempt != f'attempt_{index:04d}':
             raise ValueError('Invalid cycle attempt path')
@@ -157,7 +163,7 @@ def cycle_evidence(path, *, as_of=None):
             # A later retry must not revise a result available at an earlier cutoff.
             if cutoff and (not native.get('ended_utc') or aware(native['ended_utc']) > cutoff):
                 continue
-            run, captures, _ = read_query_evidence(report)
+            run, captures, observations = read_query_evidence(report)
             availability = captures['evidence_available_at_utc'].dropna().tolist() if 'evidence_available_at_utc' in captures else []
             run['evidence_available_at_utc'] = max(map(aware, availability)).isoformat() if availability else None
             if cutoff and run['observation_end'] and aware(run['observation_end']) > cutoff:
@@ -168,6 +174,7 @@ def cycle_evidence(path, *, as_of=None):
                     or native.get('location_filter',False) != query.get('location_filter',False)):
                 raise ValueError('Query attempt differs from the cycle plan')
             reports.append(report)
+            replayed[str(report)] = (captures, observations)
             if query['query_id'] not in selected or not selected[query['query_id']]['query_complete']:
                 selected[query['query_id']] = dict(run,report_path=str(report))
     if state['budget']['requests'] < reported_requests:
@@ -190,7 +197,20 @@ def cycle_evidence(path, *, as_of=None):
     clocks = [state['created_at']] + [run[key] for run in selected.values()
         for key in ('observation_end','invocation_end','evidence_available_at_utc') if run.get(key)]
     state['available_at'] = max(map(aware,clocks)).isoformat()
-    return state, coverage, reports
+    return state, coverage, reports, replayed
+
+
+def _source_cycle_rows(coverage, replayed):
+    """Assemble only selected, in-window rows from this invocation's validation."""
+    if 'report_path' not in coverage:
+        return pd.DataFrame()
+    source_frames = []
+    for report in coverage.loc[coverage.within_window, 'report_path'].dropna():
+        captures, source_rows = replayed[report]
+        if not source_rows.empty:
+            source_frames.append(source_rows.merge(captures[['capture_id', 'source_path']],
+                on='capture_id', validate='many_to_one'))
+    return pd.concat(source_frames, ignore_index=True) if source_frames else pd.DataFrame()
 
 
 def cycle_diagnostic(path, *, now=None):
@@ -371,28 +391,36 @@ def import_cycle(path, database):
     return import_reports(reports,database)
 
 
-def read_cycle_history(cycle_paths, database, *, as_of=None):
+def read_cycle_history(cycle_paths, database=None, *, as_of=None):
     """Read selected runs; optional UTC cutoff excludes later attempts and cycles.
 
+    With database=None, read verified retained sources directly without importing.
+    A supplied database still requires exact reconciliation to those sources.
     This reanalysis uses the current parser. Reproducing an old published vintage
     also requires its saved code/configuration hashes, not only an observation cutoff.
     """
-    days, frames = [], []
+    days, frames, verified = [], [], {}
     for path in cycle_paths:
+        path = Path(path).resolve()
         if as_of is not None and aware(json.loads(Path(path).read_text())['created_at']) > aware(as_of):
             continue
-        state, coverage, _ = cycle_evidence(path, as_of=as_of)
+        if path not in verified:
+            verified[path] = _read_cycle_evidence(path, as_of=as_of)
+        state, coverage, _, replayed = verified[path]
+        state = dict(state)  # Database reconciliation must not alter verified source coverage.
         ids = coverage.run_id.dropna().tolist() if 'run_id' in coverage else []
         rows = pd.DataFrame()
-        imported = not ids
-        if Path(database).is_file() and ids:
+        imported = database is None or not ids
+        if database is None and ids:
+            rows = _source_cycle_rows(coverage, replayed)
+        elif database is not None and Path(database).is_file() and ids:
             runs, captures, rows = read_history(database,run_ids=ids)
             imported = set(runs.run_id)==set(ids)
             expected = coverage.dropna(subset=['run_id']).set_index('run_id')
             invalid = []
             for run in runs.itertuples():
                 imported = imported and run.report_sha256 == expected.loc[run.run_id,'report_sha256']
-                _, source_captures, source_rows = read_query_evidence(expected.loc[run.run_id,'report_path'])
+                source_captures, source_rows = replayed[expected.loc[run.run_id,'report_path']]
                 try:
                     for actual,source,keys in [(rows[rows.run_id.eq(run.run_id)],source_rows,['capture_id','retailer','listing_id']),
                             (captures[captures.run_id.eq(run.run_id)],source_captures,['capture_id'])]:
