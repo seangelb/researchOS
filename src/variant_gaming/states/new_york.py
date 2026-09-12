@@ -355,7 +355,10 @@ def parse_ny_workbook(
 
     weekly = pd.concat(weekly_frames, ignore_index=True)
     weekly = weekly.sort_values(["week_ending", "fiscal_year"]).reset_index(drop=True)
-    # One economic week can appear on only one FY sheet for storage; keep first.
+    # Identical overlapping weeks can collapse; disagreeing FY sheets need review.
+    versions = weekly.groupby("week_ending")[["handle_usd", "ggr_usd"]].nunique()
+    if versions.gt(1).any(axis=None):
+        raise ValueError("Conflicting duplicate weeks across New York fiscal-year sheets")
     weekly = weekly.drop_duplicates(subset=["week_ending"], keep="first").reset_index(drop=True)
     reconciliation = pd.DataFrame(reconciliation_rows)
     return weekly, reconciliation

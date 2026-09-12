@@ -104,6 +104,8 @@ def parse_source_cell(cell) -> dict:
         return {"value": 0.0, "was_dash": True, "raw": text, "status": "dash_zero"}
     # Cell-local only: join split digits ('7 4' -> '74') without touching multi-column lines.
     compact = repair_pdf_line(text)
+    # Within a known single cell, spaced signs/currency cannot cross columns.
+    compact = re.sub(r"(?<=[-$])\s+(?=[\d$-])", "", compact)
     previous = None
     while previous != compact:
         previous = compact
@@ -199,8 +201,10 @@ def repair_pdf_line(text: str) -> str:
 def money_tokens(text: str) -> list[float | None]:
     repaired = repair_pdf_line(text)
     tokens: list[float | None] = []
-    for match in re.finditer(r"-|\(?\$?-?\d[\d,.]*(?:\)?)", repaired):
-        tok = match.group(0)
+    # In a whole row, a separated dash is a missing column, not the next sign.
+    pattern = r"\(?\s*(?:-\$?|\$\s*-?)?\d[\d,.]*\s*\)?|(?<!\S)\$?\s*-(?!\S)"
+    for match in re.finditer(pattern, repaired):
+        tok = match.group(0).strip()
         if tok == "-" or tok in {"$-", "($-"}:
             tokens.append(None)
             continue
@@ -483,10 +487,11 @@ def parse_igr_tax_page(text: str) -> dict | None:
     for raw_line in text.splitlines():
         stripped = raw_line.strip()
         if re.match(r"^3\s+Total\b", stripped, re.IGNORECASE):
-            tokens = money_tokens(stripped)
-            numeric = [v for v in tokens if v is not None]
-            if numeric:
-                amount = numeric[-1]
+            # Exclude the printed form line number. Multiple amounts are ambiguous.
+            rest = re.sub(r"^3\s+Total\b", "", stripped, flags=re.IGNORECASE)
+            tokens = money_tokens(rest)
+            if len(tokens) == 1 and tokens[0] is not None:
+                amount = tokens[0]
             break
     if amount is None:
         return None

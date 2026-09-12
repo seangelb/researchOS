@@ -81,8 +81,10 @@ def _year_from_two_digit(year: int) -> int:
 def html_table_matrix(table) -> list[list[str]]:
     rows: list[list[str]] = []
     for tr in table.find_all("tr"):
-        cells = [_cell_text(c.get_text(" ", strip=True)) for c in tr.find_all(["th", "td"])]
-        rows.append(cells)
+        cells = [_cell_text(c.get_text(" ", strip=True))
+                 for c in tr.find_all(["th", "td"], recursive=False)]
+        if cells:  # Ignore stray outer <tr> wrappers in retained 2014 HTML.
+            rows.append(cells)
     return rows
 
 
@@ -293,28 +295,29 @@ def parse_igaming_classic_tables(soup: BeautifulSoup) -> pd.DataFrame:
         year, month = int(parsed.group(2)), month_name_to_num(parsed.group(1).title())
         period_start, period_end = month_period(year, month)
 
-        casinos: list[str] = []
-        # Header row with casino names (usually row 1).
-        for row in matrix[:4]:
-            names = [_cell_text(c) for c in row if _cell_text(c)]
-            candidate = [
-                n
-                for n in names
-                if n.casefold()
-                not in {
-                    "amount played",
-                    "amount won",
-                    "net",
-                    month_label.casefold(),
-                    parsed.group(1).casefold(),
-                }
-                and not CLASSIC_MONTH_RE.search(n)
-            ]
-            if len(candidate) >= 2:
-                casinos = candidate
-                break
-        if not casinos:
-            continue
+        # Headers name each physical Played / Won / Net triplet. Older reports
+        # combine the casino and metric in one cell rather than two header rows.
+        metric_header = next((i for i, row in enumerate(matrix)
+                              if any(cell.endswith("Amount Played") for cell in row)), None)
+        if metric_header is None or metric_header == 0:
+            raise ValueError("DE classic table missing column headers")
+        header = matrix[metric_header]
+        metrics = ["Amount Played", "Amount Won", "Net"]
+        if all(cell in metrics for cell in header[1:]):
+            names = matrix[metric_header - 1][1:]
+            expected_columns = [""] + metrics * len(names)
+        else:
+            names = [cell.removesuffix("Amount Played").strip() for cell in header[1::3]]
+            expected_columns = [""] + [f"{name} {metric}".strip() for name in names for metric in metrics]
+            # April 2014 leaves the statewide prefix blank; casino prefixes remain explicit.
+            if names and not names[0]:
+                names[0] = "STATEWIDE"
+        if (not names or any(not name for name in names)
+                or len(set(names)) != len(names)
+                or matrix[metric_header] != expected_columns):
+            raise ValueError("DE classic table has inconsistent column layout")
+        names = ["STATEWIDE" if _norm(name) in {"total", parsed.group(1).casefold()}
+                 else name for name in names]
 
         total_row = None
         for row in matrix:
@@ -337,31 +340,14 @@ def parse_igaming_classic_tables(soup: BeautifulSoup) -> pd.DataFrame:
         if total_row is None:
             continue
 
-        values = [_cell_text(c) for c in total_row]
-        # Pattern: [label?] then repeating Played, Won, Net per casino (including statewide first).
-        amounts = [parse_money(v) for v in values]
-        numeric = [v for v in amounts if v is not None]
-        # Expect 3 values per casino column.
-        if len(numeric) < 3:
-            continue
-        groups = len(numeric) // 3
-        names = casinos
-        if len(names) == groups - 1:
-            names = ["Total"] + names
-        elif len(names) > groups:
-            names = names[:groups]
-        elif len(names) < groups:
-            names = names + [f"Column {i}" for i in range(len(names), groups)]
+        if len(total_row) != len(expected_columns):
+            raise ValueError("DE classic total row does not match column layout")
+        # Never drop a blank amount: its position identifies its metric and casino.
+        amounts = [parse_money(value) for value in total_row[1:]]
         for i, name in enumerate(names):
-            played = numeric[i * 3]
-            net = numeric[i * 3 + 2]
-            is_total = _norm(name) in {"total", "january", "february", "march", "april",
-                                       "may", "june", "july", "august", "september",
-                                       "october", "november", "december"} or i == 0 and groups == len(casinos) + 1
-            # First triplet is statewide when header is Month + casinos.
-            if i == 0 and len(casinos) == groups - 1:
-                is_total = True
-                name = "STATEWIDE"
+            played = amounts[i * 3]
+            net = amounts[i * 3 + 2]
+            is_total = name == "STATEWIDE"
             records.append(
                 {
                     "operator": "STATEWIDE" if is_total else name,

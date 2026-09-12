@@ -345,21 +345,37 @@ def parse_interactive_operator_sections(frame: pd.DataFrame) -> pd.DataFrame:
     gross: dict[tuple[int, int], float] = {}
     handle: dict[tuple[int, int], float] = {}
     tax: dict[tuple[int, int], float] = {}
+    missing: set[tuple[str, tuple[int, int]]] = set()
+    product_metrics = {
+        "interactive slots": {"gross", "handle", "tax"},
+        "banking tables": {"gross", "handle", "tax"},
+        "non-banking tables (poker)": {"gross", "tax"},
+    }
+    current_product = None
+    expected_components: set[tuple[str, str]] = set()
+    seen_components: set[tuple[str, str]] = set()
 
     def flush():
-        nonlocal current_operator, gross, handle, tax
+        nonlocal current_operator, gross, handle, tax, missing, current_product
+        # A missing metric row is unknown just like a blank component cell.
+        for _, metric in expected_components - seen_components:
+            missing.update((metric, (year, month)) for _, year, month in months)
+        expected_components.clear()
+        seen_components.clear()
+        current_product = None
         if not current_operator:
-            gross, handle, tax = {}, {}, {}
+            gross, handle, tax, missing = {}, {}, {}, set()
             return
-        keys = set(gross) | set(handle) | set(tax)
+        keys = set(gross) | set(handle) | set(tax) | {key for _, key in missing}
         for year, month in sorted(keys):
-            g = gross.get((year, month))
-            h = handle.get((year, month))
-            t = tax.get((year, month))
+            key = (year, month)
+            g = None if ("gross", key) in missing else gross.get(key)
+            h = None if ("handle", key) in missing else handle.get(key)
+            t = None if ("tax", key) in missing else tax.get(key)
             if g is None and h is None and t is None:
                 continue
             # Skip FY template placeholder months (explicit zeros, no activity).
-            if (g or 0) == 0 and (h or 0) == 0 and (t or 0) == 0:
+            if g == 0 and h == 0 and t == 0:
                 continue
             period_start, period_end = month_period(year, month)
             is_total = _normalize_label(current_operator) == "grand total"
@@ -377,7 +393,7 @@ def parse_interactive_operator_sections(frame: pd.DataFrame) -> pd.DataFrame:
                 }
             )
         current_operator = None
-        gross, handle, tax = {}, {}, {}
+        gross, handle, tax, missing = {}, {}, {}, set()
 
     for row_index in range(header_row + 1, len(frame)):
         label = _cell_text(frame.iloc[row_index, 0])
@@ -396,6 +412,11 @@ def parse_interactive_operator_sections(frame: pd.DataFrame) -> pd.DataFrame:
         if current_operator is None:
             continue
 
+        if norm_base in product_metrics:
+            current_product = norm_base
+            expected_components.update((norm_base, metric) for metric in product_metrics[norm_base])
+            continue
+
         metric = None
         if norm in {"gross revenue"} or norm_base == "gross revenue":
             metric = "gross"
@@ -408,11 +429,15 @@ def parse_interactive_operator_sections(frame: pd.DataFrame) -> pd.DataFrame:
         if metric is None:
             continue
 
+        if current_product is not None:
+            seen_components.add((current_product, metric))
         for col_index, year, month in months:
             amount = parse_money(frame.iloc[row_index, col_index])
-            if amount is None:
-                continue
             key = (year, month)
+            if amount is None:
+                # An expected component is unknown; known components are not a total.
+                missing.add((metric, key))
+                continue
             if metric == "gross":
                 gross[key] = gross.get(key, 0.0) + amount
             elif metric == "handle":

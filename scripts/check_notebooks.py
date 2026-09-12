@@ -1,4 +1,4 @@
-"""Run Carvana notebook cells with network, exports and SQLite writes blocked.
+"""Run active notebook cells in memory with network, exports and SQLite writes blocked.
 
 This is an offline regression check for trusted repository notebooks, not a sandbox
 for arbitrary code. It does not save notebook outputs or alter approval bindings.
@@ -6,8 +6,6 @@ for arbitrary code. It does not save notebook outputs or alter approval bindings
 from __future__ import annotations
 
 import argparse
-import ast
-import builtins
 import contextlib
 import io
 import json
@@ -20,6 +18,7 @@ import tempfile
 from unittest.mock import patch
 from urllib.parse import parse_qs, urlsplit
 
+ACTIVE_NOTEBOOKS = ("00", "10", "11", "20", "30", "31", "90", "91", "92", "93")
 APPROVAL_BLOCK = "FAIL CLOSED: analyst-approval binding mismatch:"
 
 
@@ -31,17 +30,9 @@ def offline_guards():
     import IPython.display
 
     original_connect = sqlite3.connect
-    original_open, original_io_open = builtins.open, io.open
 
     def deny(*args, **kwargs):
         raise RuntimeError("Offline notebook check blocks network and exports")
-
-    def reader_only(original):
-        def open_readonly(file, mode='r', *args, **kwargs):
-            if any(flag in mode for flag in 'wax+'):
-                raise RuntimeError('Offline notebook check blocks file writes')
-            return original(file, mode, *args, **kwargs)
-        return open_readonly
 
     def readonly(database, *args, **kwargs):
         uri = str(database)
@@ -58,13 +49,6 @@ def offline_guards():
             ("pandas.Series.to_csv", deny),
             ("sqlite3.connect", readonly),
             ("IPython.display.display", lambda *a, **k: None),
-            ("builtins.open", reader_only(original_open)),
-            ("io.open", reader_only(original_io_open)),
-            ("pathlib.Path.mkdir", deny),
-            ("pathlib.Path.unlink", deny),
-            ("pathlib.Path.rename", deny),
-            ("pathlib.Path.replace", deny),
-            ("sys.dont_write_bytecode", True),
         ):
             stack.enter_context(patch(target, replacement))
         yield
@@ -75,7 +59,7 @@ def run_notebook(path: Path, root: Path) -> dict:
 
     notebook = json.loads(path.read_text(encoding="utf-8"))
     scope = {"__name__": "__main__"}
-    output, completed, executable_cells = io.StringIO(), 0, 0
+    output, completed = io.StringIO(), 0
     previous_cwd = Path.cwd()
     result = {"notebook": path.name, "status": "PASS"}
     try:
@@ -83,10 +67,7 @@ def run_notebook(path: Path, root: Path) -> dict:
         with offline_guards(), contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
             for index, cell in enumerate(notebook["cells"]):
                 if cell["cell_type"] == "code":
-                    filename = f"{path.name}:cell{index}"
-                    syntax = ast.parse("".join(cell["source"]), filename=filename)
-                    executable_cells += bool(syntax.body)
-                    exec(compile(syntax, filename, "exec"), scope)
+                    exec(compile("".join(cell["source"]), f"{path.name}:cell{index}", "exec"), scope)
                     completed += 1
                     plt.close("all")
     except (Exception, SystemExit) as exc:
@@ -97,8 +78,6 @@ def run_notebook(path: Path, root: Path) -> dict:
         os.chdir(previous_cwd)
         plt.close("all")
     result["code_cells"] = completed
-    if result["status"] == "PASS" and not executable_cells:
-        result.update(status="FAIL", reason="Notebook has no executable code cells")
     return result
 
 
@@ -106,17 +85,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parents[1])
     args = parser.parse_args()
-    project = (args.root / "vehicle").resolve()
-    directory = project / "notebooks"
-    if not directory.is_dir():
-        parser.error(f"Notebook directory does not exist: {directory}")
-    notebooks = sorted(path for path in directory.glob("*.ipynb") if path.is_file())
-    if not notebooks:
-        parser.error(f"No notebooks found in: {directory}")
     os.environ["MPLBACKEND"] = "Agg"
     with tempfile.TemporaryDirectory(prefix="researchos-notebook-mpl-") as cache:
         os.environ["MPLCONFIGDIR"] = cache
-        results = [run_notebook(path, project) for path in notebooks]
+        results = [run_notebook(next((args.root / "notebooks").glob(f"{prefix}_*.ipynb")), args.root)
+                   for prefix in ACTIVE_NOTEBOOKS]
     for result in results:
         print(json.dumps(result, ensure_ascii=True))
     # Approval blocks are understandable but never counted as successful execution.

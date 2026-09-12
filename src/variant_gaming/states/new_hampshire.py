@@ -83,12 +83,12 @@ def discover_summary_links(html: str, base_url: str = LANDING_URL) -> list[dict]
 
 def _extract_mobile_amounts(segment: str) -> list[float]:
     """Extract first three money values from the Mobile column group."""
-    text = segment.replace("$", " ")
+    text = segment
     # Repair PDF digit splits: "4 4,191,929" -> "44,191,929", "6 4,609,513" -> "64,609,513"
     text = re.sub(r"\b(\d)\s+(\d{1,3}(?:,\d{3})+)\b", r"\1\2", text)
     text = re.sub(r"\b(\d)\s+(\d{4,})\b", r"\1\2", text)
     values: list[float] = []
-    for token in re.findall(r"\d[\d,]*\.?\d*", text):
+    for token in re.findall(r"\(?\s*(?:-\s*\$?\s*|\$\s*-?\s*)?\d[\d,]*\.?\d*\s*\)?", text):
         value = parse_money(token)
         if value is not None:
             values.append(value)

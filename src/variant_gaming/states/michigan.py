@@ -42,7 +42,7 @@ JURISDICTION = "Michigan"
 SPORTS_VERTICAL = "online_sports_betting"
 CASINO_VERTICAL = "online_casino"
 SPORTS_REPORTED_REVENUE_NAME = "Adjusted Gross"
-CASINO_REPORTED_REVENUE_NAME = "Adjusted Gross"
+CASINO_REPORTED_REVENUE_NAME = "Gross Receipts"
 
 NOTE_SUFFIX_RE = re.compile(r"\s*NOTE\s*\d+\s*$", re.IGNORECASE)
 YEAR_IN_TEXT_RE = re.compile(r"(20\d{2})")

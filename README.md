@@ -14,18 +14,22 @@ Use pandas in Jupyter to inspect the results. No service or separate application
   Inventories sportsbook evidence across states; conclusions only where approved (MA today).
 - **`notebooks/93_flut_online_casino_signal.ipynb` — FanDuel online casino / cross-product.**
   MI iGaming revenue-share exploratory analysis and OSB vs casino direction table.
-- **`notebooks/20_run_all_collectors.ipynb` — updates.** Choose state/product pairs,
-  inspect the plan, then set `run_downloads = True` when ready to collect.
-  Each selected source runs its existing history routine. Use `selected_sources = None`
-  for all registered collectors and gap recorders. This is not an incremental refresh
-  and does not mean every inventory row has a working collector.
+- **`notebooks/20_run_all_collectors.ipynb` — updates.** Choose explicit `recent` or
+  `history` mode and inspect the database destination. Recent mode supports MA monthly
+  PDFs and NY weekly workbooks. Both `run_downloads` and `allow_database_writes` must
+  be true to collect; both default to false. Unsupported recent sources raise a clear
+  error. Use `selected_sources = None` only with explicit history mode for all registered
+  collectors and gap recorders; that is not a claim of complete nationwide collection.
 - **`notebooks/31_massachusetts_pdf_walkthrough.ipynb` — learn one parser.**
   Inspect a saved PDF, call the module parser, and reconcile to the printed total.
   Runs offline and writes nothing.
 
-Notebooks 00, 10, 11, and 30 are optional source examples. Notebook 10 downloads
-its discovery page. Notebooks 40–43 are historical investigations with snapshot
-assumptions; use notebook 90 for current analysis.
+Notebooks 00, 10, 11, and 30 are optional offline source examples. Notebooks 00,
+10, and 11 explicitly select staging and inspect it read-only. Notebook 10 fetches
+its discovery page only when `run_live_discovery = True`; its retained workbook
+example runs offline. Notebook 30 checks expected months and handle amounts, not
+GGR/tax reconciliation. Notebooks 40–43 remain historical investigations with
+snapshot assumptions; use notebook 90 for current analysis.
 
 ## Setup (Python 3.11)
 
@@ -49,7 +53,8 @@ Notebook 90 reads SQLite, consolidates observations, and displays tables and cha
 | `config/transcribed_report_rows.csv` | Visually checked scan values, bound to exact report hashes/pages |
 | `src/variant_gaming/states/` | One module per state format |
 | `src/variant_gaming/common.py` | Download, file hashing, dates, money parsing |
-| `src/variant_gaming/collect.py` | Explicit source mapping and sequential updates |
+| `src/variant_gaming/collect.py` | Explicit source mapping and full-history updates |
+| `src/variant_gaming/recent.py` | Small MA/NY recent refresh and per-report results |
 | `src/variant_gaming/storage.py` | SQLite reads and writes |
 | `src/variant_gaming/consolidate.py` | Source conflicts, labeled sums, CSV exports |
 | `tests/fixtures/` | Small saved reports for parser tests |
@@ -59,7 +64,7 @@ Notebook 90 reads SQLite, consolidates observations, and displays tables and cha
 - Choose `gross_revenue`, `adjusted_revenue`, `taxable_revenue`, or `net_proceeds`
   explicitly. A missing metric is never replaced by another revenue definition.
 - `handle` and `tax` are also selectable. Negative revenue and reported zeros are valid.
-- Weeks remain weeks. Missing months remain gaps.
+- Weeks remain weeks. Missing months and weeks remain gaps on their reporting grids.
 - A published statewide total is labeled `reported_total`. An operator sum is
   `operator_coverage_unverified`: known values alone do not prove every operator is present.
   If a contributing value is missing, its sum is missing too.
@@ -91,16 +96,16 @@ observed ranges, missing periods, and exact reasons for gaps. The inventory has 
 rows (50 states plus DC, two products). It is a coverage map, not a claim of 102
 collected series or complete national GGR. Collection logs are in `data/staging/`.
 
-In either notebook, select one database with:
+In notebooks 00, 10, 11, 20, and 90, select one database with:
 
 ```python
 database_file = "data/staging/gaming_nationwide.sqlite"  # new data and corrected replays
 # database_file = "data/gaming.sqlite"                  # preserved original data
 ```
 
-Notebook 90 opens the selected database read-only. Notebook 20 defaults to staging;
-set `selected_sources`, review the displayed plan, and explicitly enable
-`run_downloads`. The staging database is local and ignored by Git, like raw captures.
+Notebooks 00, 10, 11, and 90 open the selected database read-only. Notebook 20 defaults to staging;
+set `selected_sources` and `collection_mode`, review the displayed plan, and explicitly
+enable both `run_downloads` and `allow_database_writes`. The staging database is local and ignored by Git, like raw captures.
 To create another staging copy, use SQLite's backup API with a read-only source;
 do not overwrite an existing staging file that contains work.
 
@@ -207,20 +212,104 @@ stored coverage notes may also need a reviewed update.
 Use existing helpers. Keep state-specific quirks in that state's module.
 A manually downloaded official report is a valid starting point.
 
-## Verify changes
+## Verification — September 7, 2026
+
+The notebook-review repairs passed **305 tests in 91.28 seconds**, including
+31 focused notebook regressions (nine Matplotlib backend/layout warnings). Before
+repair, those regressions produced 30 failures and one valid-input pass. The guarded
+offline checker passed all ten active/source notebooks: 00, 10, 11, 20, 30, 31,
+and 90–93, totaling 65 code cells. An intentionally changed MA approval binding
+correctly produced a blocked result. Five additional notebook 90 selections passed,
+including NY weekly, missing data, and MI adjusted revenue.
+
+NY comparisons now require complete, unique, matching weekly grids. NJ requires
+every requested month and one FanDuel observation; its denominator remains explicitly
+unverified because the retained operator rows do not prove a complete roster. Weekly
+charts show missing weeks as gaps. Michigan's share-direction and dominant-component
+wording follows calculated results while retaining Gross Receipts as the measure.
+
+MA result tables and MI monthly shares, coverage checks, cross-product table, and
+decomposition matched the pre-edit results exactly. Both protected databases and all
+1,572 raw files remained unchanged. Notebooks 20, 31, 40–43, and 91 were byte-for-byte
+preserved; notebook 90 changed only coverage/chart cells and their explanation.
+The previous uncommitted parser/collection work and approval-bound source/configuration
+files were preserved. No approval hashes were replaced. `git diff --check` passed.
+
+These notebook-review repairs add 128 executable lines (64 net), including the expanded
+checker list, excluding tests and explanations. Changes remain local and uncommitted.
+
+| Protected database | SHA-256 |
+| --- | --- |
+| Original `data/gaming.sqlite` | `62afd2b97459f151e62fbbf24c7e0d0fe5a52e9dee829931d2554b9b1529d388` |
+| Staging `data/staging/gaming_nationwide.sqlite` | `023ca5e8e4c16ff0981a2783dabcedf9399939e0241701b0394bc0277eff6ce9` |
+
+No live collection, installation, or historical database replay was performed.
+The preceding parser/collection milestone added 82 repair source lines and about 495 other lines,
+including the offline checker and executable notebook cells, excluding tests and
+explanatory text. The existing Python/pandas/SQLite/Jupyter architecture remains.
+
+## Learn, refresh, analyze
+
+Start with **31 → 20 → 90 → 91 → 92 → 93**. Notebook 31 shows the retained official
+MA report, extracted rows, normalized columns, missing values, and reconciliation
+differences before analysis. Notebook 20 explains collection without executing it by
+default. Notebook 90 exposes metric selection, coverage, conflicts, and source tracing.
+Notebooks 91–93 separate FanDuel market growth, share changes, and sportsbook hold;
+casino revenue alone cannot identify hold or profitability. Michigan casino uses
+**Gross Receipts (`gross_revenue`)**; Adjusted Gross Receipts remains a distinct field.
+
+MA recent collection discovers available months and fetches only the latest
+`recent_report_limit` PDFs (two by default), rather than every historical PDF. The
+index pages still need to be fetched. NY's current statewide and optional operator
+workbooks contain fiscal-year sheets of weekly observations: download bytes to check
+for changes, then skip parsing only when identical bytes and a verified complete ingestion are already
+retained. Missing observations or missing retained bytes require parsing. A small
+`recent_ingestions` table in the selected database records the row count after a
+successful ingest. Legacy versions without this receipt parse once before skipping. Use explicit
+full-history collection when older MA months need review; recent mode does not certify
+the archive is complete and can miss older revised months outside its selected window.
+
+`collect_recent(..., db_path=...)` requires a database destination and returns a
+DataFrame with report identity, observation dates, URL, download status, byte-change
+status, parsed/stored/existing row counts, validation, reason, and retained file/hash.
+Counts are rows, monetary observations remain USD. `stored_rows` counts upserted rows,
+not net additions; `bytes_changed` is unknown with no stored comparison. The result is
+an in-memory run log; only successful-ingestion counts persist in the same SQLite
+database. It does not overwrite the existing full-history coverage table.
+No extra scheduler, separate log database, or background process is involved.
+
+Changed hashes are kept separately and may create conflicts visible in notebook 90.
+Identical-byte skips preserve the first capture metadata. `force_reparse=True` is for a
+deliberate parser replay and can update parsed values for the same source hash: prepare
+a candidate database and review differences separately before replacing any data.
+It does not confer approval or automatically pick an authoritative source version.
+
+The September 2026 repairs prevent Delaware column shifts, partial Pennsylvania
+casino totals, New Jersey form-number and sign errors, and New Hampshire sign loss.
+They have **not** been replayed into existing databases. The extent of any historical
+impact requires a separate retained-source audit and candidate replay. Michigan's
+label correction preserves the selected gross-receipts calculations. Existing stored
+Michigan generic labels can remain old; analysis uses metric-specific definitions.
+
+## Small changes and offline verification
+
+Use plain functions, explicit arguments, state parsers, documented DataFrame columns
+and units, and visible pandas analysis. Test missing cells, reported zeros, negatives,
+dates, and duplicate keys with retained fixtures. Parsers do no downloads or writes.
+See `AGENTS.md` for the short development rules.
 
 ```powershell
 .\.venv\Scripts\python.exe -B -m pytest -q -p no:cacheprovider
+.\.venv\Scripts\python.exe -B scripts/check_notebooks.py
 ```
 
-Tests use retained fixtures and temporary databases. Do not run collectors just to test a parser.
+Collector tests use mocked HTTP and temporary files/databases. The notebook check
+executes active notebooks in memory and blocks network requests, CSV exports, and
+writable SQLite connections. It does not save notebook outputs. Local retained data
+is needed for the full notebook check; fixture-based tests remain runnable offline.
 
-Nationwide validation on 2026-09-05: **184 tests passed**. Notebook 90 executed
-against staging with HTTP requests and CSV writes blocked and read-only SQLite
-connections enforced. Original database SHA-256 remained
-`62afd2b97459f151e62fbbf24c7e0d0fe5a52e9dee829931d2554b9b1529d388`; staging SHA-256 is `5b7c00777123494d089fc13358bf82dc73102d2d03a9c0b0853fbfa7940ebd0d` after the Massachusetts
-printed-total repair. Both hashes were unchanged during notebook execution.
-`git diff --check` passed. All 1,134 preexisting raw files matched their
-before-work hashes. Massachusetts state-period rows display `reported_total`.
-Details are in `data/staging/validation_summary.json` and
-`data/staging/protected_file_hashes.json`.
+MA approval is bound to exact source/configuration files and the staging database.
+Those approval values are not refreshed automatically. A mismatch must block the
+approved result with an explanation, even when exploratory calculations are otherwise
+possible. Re-running tests is not renewed human approval. Keep notebook analysis and
+any live refresh or historical replay as separate decisions.
