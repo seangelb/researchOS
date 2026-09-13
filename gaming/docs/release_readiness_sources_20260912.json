@@ -1,0 +1,221 @@
+{
+  "review_date_local": "2026-09-12",
+  "review_timezone": "America/New_York",
+  "capture_start_utc": "2026-09-13T00:08:47.519483+00:00",
+  "capture_end_utc": "2026-09-13T00:09:20.167728+00:00",
+  "target_month": "2026-08",
+  "decision": "unavailable",
+  "decision_scope": "August MA online sportsbook and MI online sportsbook/casino were not found in the checked official sources at the retained capture clocks. This does not establish absence everywhere.",
+  "selected_snapshot_unchanged": {
+    "database_file": "data/staging/refresh_20260912T201854Z/gaming_current.sqlite",
+    "database_sha256": "751e135c083f66d025ca4d03116021215ac136518ba24b2093f135af044df3ee",
+    "quarter": "2026Q3",
+    "through_month": "2026-07"
+  },
+  "source_file_base": "gaming/",
+  "sources": [
+    {
+      "id": "ma_landing",
+      "url": "https://massgaming.com/regulations/revenue/",
+      "resolved_url": "https://massgaming.com/regulations/revenue/",
+      "captured_at": "2026-09-13T00:08:47.834297+00:00",
+      "source_file": "data/raw/RELEASE_CHECK/2026-09-13/70530eafde4381adcbe0feb298fbb1ee9f63124b4eb78dfe59bf1703b085c481_ma_landing.html",
+      "sha256": "70530eafde4381adcbe0feb298fbb1ee9f63124b4eb78dfe59bf1703b085c481",
+      "bytes": 82932,
+      "http_status": 200
+    },
+    {
+      "id": "ma_archive",
+      "url": "https://massgaming.com/regulations/revenue/revenue-report-archives/",
+      "resolved_url": "https://massgaming.com/regulations/revenue/revenue-report-archives/",
+      "captured_at": "2026-09-13T00:08:47.832010+00:00",
+      "source_file": "data/raw/RELEASE_CHECK/2026-09-13/454a983019fc605e3b72750f78a22ed6b0c853948d46c559ce0aa18feb16ec0d_ma_archive.html",
+      "sha256": "454a983019fc605e3b72750f78a22ed6b0c853948d46c559ce0aa18feb16ec0d",
+      "bytes": 83507,
+      "http_status": 200
+    },
+    {
+      "id": "mi_landing",
+      "url": "https://www.michigan.gov/mgcb/detroit-casinos/resources/revenues-and-wagering-tax-information",
+      "resolved_url": "https://www.michigan.gov/mgcb/detroit-casinos/resources/revenues-and-wagering-tax-information",
+      "captured_at": "2026-09-13T00:08:47.540837+00:00",
+      "source_file": "data/raw/RELEASE_CHECK/2026-09-13/2960b76e4824041b150ca0a42119e0ea3e682a28a35aafa14a05606fdc89b62a_mi_landing.html",
+      "sha256": "2960b76e4824041b150ca0a42119e0ea3e682a28a35aafa14a05606fdc89b62a",
+      "bytes": 101456,
+      "http_status": 200
+    },
+    {
+      "id": "mi_news",
+      "url": "https://www.michigan.gov/mgcb/news",
+      "resolved_url": "https://www.michigan.gov/mgcb/news",
+      "captured_at": "2026-09-13T00:08:47.519483+00:00",
+      "source_file": "data/raw/RELEASE_CHECK/2026-09-13/8758e2237f288fd220cee4e40eafec40eb4bd900eca42ad54660f2433a7f827b_mi_news.html",
+      "sha256": "8758e2237f288fd220cee4e40eafec40eb4bd900eca42ad54660f2433a7f827b",
+      "bytes": 99783,
+      "http_status": 200
+    },
+    {
+      "id": "mi_sports",
+      "url": "https://www.michigan.gov/mgcb/-/media/Project/Websites/mgcb/Detroit-Casino-Revenue-Files/Internet-Sports-Betting---2026.xlsx?rev=17cd847ea88a4b1a86245b055013b0cf&hash=15EFC480478985B51B370E433913CE29",
+      "resolved_url": "https://www.michigan.gov/mgcb/-/media/Project/Websites/mgcb/Detroit-Casino-Revenue-Files/Internet-Sports-Betting---2026.xlsx?rev=17cd847ea88a4b1a86245b055013b0cf&hash=15EFC480478985B51B370E433913CE29",
+      "captured_at": "2026-09-13T00:09:19.474408+00:00",
+      "source_file": "data/raw/RELEASE_CHECK/2026-09-13/72aac626d0c6948063ddd215279ce046f8f10e5530f76677716725dd712ab99c_Internet-Sports-Betting---2026.xlsx",
+      "sha256": "72aac626d0c6948063ddd215279ce046f8f10e5530f76677716725dd712ab99c",
+      "bytes": 72729,
+      "http_status": 200
+    },
+    {
+      "id": "mi_casino",
+      "url": "https://www.michigan.gov/mgcb/-/media/Project/Websites/mgcb/Detroit-Casino-Revenue-Files/Internet-Gaming---2026.xlsx?rev=ff226c04b053461ba3fcbd87bf24fdf4&hash=A49CAD46FFBA2B3B63EB24B35DC45C3D",
+      "resolved_url": "https://www.michigan.gov/mgcb/-/media/Project/Websites/mgcb/Detroit-Casino-Revenue-Files/Internet-Gaming---2026.xlsx?rev=ff226c04b053461ba3fcbd87bf24fdf4&hash=A49CAD46FFBA2B3B63EB24B35DC45C3D",
+      "captured_at": "2026-09-13T00:09:19.475502+00:00",
+      "source_file": "data/raw/RELEASE_CHECK/2026-09-13/69663920af1cd84804481f46149cfd9917c8bd0d274c25319e514a8b9059296a_Internet-Gaming---2026.xlsx",
+      "sha256": "69663920af1cd84804481f46149cfd9917c8bd0d274c25319e514a8b9059296a",
+      "bytes": 66385,
+      "http_status": 200
+    },
+    {
+      "id": "ma_latest",
+      "url": "https://massgaming.com/wp-content/uploads/MGC-Revenue-Report-July-2026.pdf",
+      "resolved_url": "https://massgaming.com/wp-content/uploads/MGC-Revenue-Report-July-2026.pdf",
+      "captured_at": "2026-09-13T00:09:20.167728+00:00",
+      "source_file": "data/raw/RELEASE_CHECK/2026-09-13/ccac154845a1a2e63dac0a33a9d725edf6eeaa2f2037365c9175596c92891517_MGC-Revenue-Report-July-2026.pdf",
+      "sha256": "ccac154845a1a2e63dac0a33a9d725edf6eeaa2f2037365c9175596c92891517",
+      "bytes": 738628,
+      "http_status": 200
+    }
+  ],
+  "discovery_checks": {
+    "ma_source_ids": [
+      "ma_landing",
+      "ma_archive"
+    ],
+    "latest_listed_consolidated_month": "2026-07",
+    "august_2026_report_found": false,
+    "mi_source_ids": [
+      "mi_landing",
+      "mi_news"
+    ],
+    "mi_current_year_workbooks": [
+      "mi_sports",
+      "mi_casino"
+    ],
+    "note": "Annual links and collector completion do not establish populated target-month data. Current workbook rows were inspected directly."
+  },
+  "report_checks": [
+    {
+      "source_id": "mi_sports",
+      "parsed_2026_months": [
+        "2026-01",
+        "2026-02",
+        "2026-03",
+        "2026-04",
+        "2026-05",
+        "2026-06",
+        "2026-07"
+      ],
+      "parsed_rows": 112,
+      "august_raw_rows": [
+        {
+          "sheet": "Internet Sports Betting 2026",
+          "excel_row": 14,
+          "nonempty_numeric_cell_count": 0
+        },
+        {
+          "sheet": "Internet Sports Betting 2025",
+          "excel_row": 14,
+          "nonempty_numeric_cell_count": 65
+        }
+      ],
+      "same_bytes_as_selected_database_source": true,
+      "finding": "The current-year August numeric row is empty; populated prior-year August rows are not 2026 evidence."
+    },
+    {
+      "source_id": "mi_casino",
+      "parsed_2026_months": [
+        "2026-01",
+        "2026-02",
+        "2026-03",
+        "2026-04",
+        "2026-05",
+        "2026-06",
+        "2026-07"
+      ],
+      "parsed_rows": 112,
+      "august_raw_rows": [
+        {
+          "sheet": "Internet Gaming 2026",
+          "excel_row": 14,
+          "nonempty_numeric_cell_count": 0
+        },
+        {
+          "sheet": "Internet Gaming 2025",
+          "excel_row": 14,
+          "nonempty_numeric_cell_count": 50
+        }
+      ],
+      "same_bytes_as_selected_database_source": true,
+      "finding": "The current-year August numeric row is empty; populated prior-year August rows are not 2026 evidence."
+    },
+    {
+      "source_id": "ma_latest",
+      "report_month": "2026-07",
+      "same_bytes_as_selected_database_source": true
+    }
+  ],
+  "next_comparison_windows": {
+    "latest": [
+      "2026-06",
+      "2026-07",
+      "2026-08"
+    ],
+    "latest_prior_year": [
+      "2025-06",
+      "2025-07",
+      "2025-08"
+    ],
+    "prior_monthly_read": [
+      "2026-05",
+      "2026-06",
+      "2026-07"
+    ],
+    "prior_monthly_read_prior_year": [
+      "2025-05",
+      "2025-06",
+      "2025-07"
+    ],
+    "preceding_nonoverlapping_for_acceleration": [
+      "2026-03",
+      "2026-04",
+      "2026-05"
+    ],
+    "preceding_nonoverlapping_prior_year": [
+      "2025-03",
+      "2025-04",
+      "2025-05"
+    ],
+    "share_interpretation": "A less-negative latest-window YoY share change than the prior monthly read means losses narrowed; it is not a positive YoY share gain or evidence of durable stabilization.",
+    "same_capture_required_for_prior_read": true,
+    "complete_requested_windows_required": true
+  },
+  "audit_inputs": [
+    {
+      "file": "sources.json",
+      "sha256": "22449a015e92705ce89fa378c6868cb5e3ddd29f2cd8bcd913a10d84a37734d8"
+    },
+    {
+      "file": "discovery.json",
+      "sha256": "55bf7e60ac59c3eef0fb9eb8087472b6bf671699795207ffa0e294fc6b5df825"
+    },
+    {
+      "file": "report_checks.json",
+      "sha256": "124402f5c9c0496d63b7cd207f12ab652de0f64835cd5c1b64051f52f3c63717"
+    }
+  ],
+  "audit_input_location": "C:\\Users\\Sean\\Documents\\ChatGPT\\ResearchOS\\gaming_release_check_20260913",
+  "limitations": [
+    "This is a retained-source availability check, not a new operating-data refresh or exhaustive publication search.",
+    "No release date is inferred; publication availability must be checked again on the next explicit run.",
+    "No August company-share results can be calculated from the checked sources."
+  ]
+}

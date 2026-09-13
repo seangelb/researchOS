@@ -2,6 +2,8 @@
 
 Start with [notebook 94](../notebooks/94_gaming_industry_update.ipynb). Read supporting and contrary evidence together, then the latest three-month comparison, 12-month charts, prior-read changes and gaps. The [September 12 monthly review](monthly_fundamentals_20260912.md) is a saved example; the [earlier July-only study](industry_update_20260912.md) remains a historical reference. One month and three months can point differently: July FanDuel MA share rose, while its May–July share declined.
 
+The [September 12 August release check](release_readiness_20260912.md) records the checked sources, current availability and the conditions for the next company-share comparison.
+
 ## Capture, read, investigate
 
 1. [Notebook 20](../notebooks/20_run_all_collectors.ipynb) previews explicit state/product sources, the current base, a new dated destination and separate ZIP backup. Recent mode supports MA/NY sportsbook; other collectors require explicit history mode. Both download/write switches default off. A live refresh preserves its base and validates source bytes, SQLite schema/clocks and backup restoration. Inspect collection exceptions; completion is not complete historical coverage.
