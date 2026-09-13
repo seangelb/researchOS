@@ -10,6 +10,8 @@ One notebook-first research repository with two independent projects:
 Each project has its own modules, notebooks, fixtures, and data. ResearchOSCore and
 the older EquityIntelligenceOS investment system remain separate repositories.
 
+For a guided review of the current work, follow [the notebook reading order](REVIEW.md).
+
 ## Open the notebooks
 
 Open this repository in Cursor or VS Code and use its root Python 3.11 environment.

@@ -4,6 +4,10 @@ Learn **00 → 10 → 11 → 20 → 24 → 30**. In routine use, review **20 and
 open 30 for quarterly assumptions and forecasts. Notebooks 21, 22 and 23 are
 intraday, original frozen-cohort and specialist references.
 
+The [September 13 review checkpoint](checkpoint_20260913.md) records the one
+new native status observation, the stopped browser batch, the deferred broader
+daily baseline, and the cutoff to select when reviewing the latest evidence.
+
 Normal **Restart Kernel and Run All is offline and read-only**. Notebook 11's
 live function is defined but never invoked by default. Collection is a separate
 deliberate action; the proposed operating dates are not a scheduler.
