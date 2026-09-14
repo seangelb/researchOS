@@ -150,6 +150,20 @@ class CycleBudget(NavigationBudget):
         self.stopped = True
         self.save()
 
+    def isolate_query_failure(self, *, requests, report, report_sha256):
+        state = _cycle_state(self.path)
+        saved = state['budget']
+        if (saved['pending_request'] or not saved['stopped']
+                or saved['requests'] != requests or self.requests != requests):
+            raise ValueError('Unreconciled durable request; cannot isolate query failure')
+        # Preserve the reason for continuation even if the parent process then dies.
+        state.setdefault('isolated_query_failures', []).append(dict(
+            report=str(report), report_sha256=report_sha256, requests=requests,
+            recorded_at=utcnow().isoformat()))
+        state['budget']['stopped'] = False
+        write_json_atomic(self.path, state)
+        self.stopped = False
+
 
 def cycle_evidence(path, *, as_of=None):
     """Return cycle metadata, every requested query's coverage, and all attempt reports."""

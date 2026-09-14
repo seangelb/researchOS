@@ -20,6 +20,8 @@ def main(argv=None):
     parser.add_argument('--target-listings',type=int,default=1000)
     parser.add_argument('--target-vins',type=int,help='One fresh trial targeting a distinct VIN union; no resume')
     parser.add_argument('--full-plan',action='store_true',help='Finish every query rather than a sample target')
+    parser.add_argument('--isolate-pagination',action='store_true',
+        help='Fresh full-plan experiment only: continue other queries after a reconciled pagination failure')
     parser.add_argument('--max-requests',type=int,default=120)
     parser.add_argument('--max-seconds',type=float,default=1200)
     parser.add_argument('--resume-from',type=Path,help='Older sample/plan recovery; not daily-cycle recovery')
@@ -30,6 +32,8 @@ def main(argv=None):
     parser.add_argument('--resume-cycle',action='store_true',help='Continue the SAME experiment/date and limits')
     parser.add_argument('--live',action='store_true')
     args=parser.parse_args(argv)
+    if args.isolate_pagination and (not args.full_plan or args.resume_from or args.cycle_date or args.resume_cycle):
+        parser.error('--isolate-pagination requires a fresh --full-plan experiment; existing daily cycles are unchanged')
     if args.target_vins is not None and (args.target_vins < 1 or args.full_plan or args.resume_from
                                        or args.resume_cycle or args.cycle_date):
         parser.error('--target-vins requires a positive target and a fresh sample; no resume or daily/full-plan options')
@@ -53,7 +57,8 @@ def main(argv=None):
         preview=dict(mode='distinct_vin_trial' if args.target_vins else 'full_plan' if args.full_plan else 'sample',
             target=args.target_vins if args.target_vins else None if args.full_plan else args.target_listings,
             max_requests=args.max_requests,max_seconds=args.max_seconds,resume_from=str(args.resume_from))
-    print(json.dumps(dict(preview,plan=str(args.plan.resolve()),query_count=len(queries),destination=str(destination)),indent=2))
+    print(json.dumps(dict(preview,isolate_pagination=args.isolate_pagination,
+        plan=str(args.plan.resolve()),query_count=len(queries),destination=str(destination)),indent=2))
     if not args.live:
         print('Preview only: no requests or writes. Inspect every partition in the plan file; national coverage is unverified.')
         return 0
@@ -64,7 +69,8 @@ def main(argv=None):
         success=result['coverage_complete']
     else:
         result=collect_plan(queries,destination=destination,target_listings=args.target_listings,
-            budget=budget,resume_from=args.resume_from,full_plan=args.full_plan,target_vins=args.target_vins)
+            budget=budget,resume_from=args.resume_from,full_plan=args.full_plan,target_vins=args.target_vins,
+            isolate_pagination=args.isolate_pagination)
         success=(result['target_reached'] and not result.get('stopped') if args.target_vins else
                  result['all_queries_complete'] or (not args.full_plan and result['target_reached']))
     print(json.dumps({key:value for key,value in result.items() if key not in {'queries','outcomes'}},indent=2))

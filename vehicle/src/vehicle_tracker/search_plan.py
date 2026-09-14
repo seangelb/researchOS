@@ -85,8 +85,62 @@ def validate_plan(queries):
             raise ValueError('location_filter must be an explicit boolean')
 
 
+def verify_isolated_pagination(report_file, *, known_listing_vins, requests):
+    """Prove a completed, stored pagination failure has no hidden identity conflict.
+
+    Failed page rows remain excluded. Replaying them here only checks that it is
+    safe to collect another independent query; this never repairs completeness.
+    """
+    from vehicle_tracker.history import read_query_evidence
+    from vehicle_tracker.search import project_response, build_search_request
+    from vehicle_tracker.search_evidence import verify_response_evidence
+    from vehicle_tracker.carvana import parse_capture
+    report = json.loads(Path(report_file).read_text(encoding='utf-8'))
+    pages = report['pages']
+    if (report.get('outcome_kind') != 'pagination_unstable' or report['query_complete']
+            or report['requests'] != requests or not pages or len(pages) != requests
+            or pages[-1].get('outcome_kind') != 'pagination_unstable'
+            or pages[-1]['status'] != 'failed'
+            or any(p['status'] != 'parsed' for p in pages[:-1])):
+        raise ValueError('Only a completed pagination-only query may be isolated')
+    _, source_captures, source_rows = read_query_evidence(report_file)
+    captured, stored = read_snapshots(Path(report_file).parent/'vehicle.sqlite')
+    actual = captured.rename(columns={'page_number':'page', 'source_sha256':'capture_id'})
+    columns = ['run_id','page','capture_id','status','row_count','observed_at_utc','error']
+    pd.testing.assert_frame_equal(actual[columns].sort_values('page').reset_index(drop=True),
+        source_captures[columns].sort_values('page').reset_index(drop=True), check_dtype=False, check_exact=True)
+    if not source_rows.empty:
+        expected = source_rows.drop(columns=[*NATIVE_FIELDS,'capture_id','run_id'])
+        pd.testing.assert_frame_equal(expected.sort_values('listing_id').reset_index(drop=True),
+            stored[expected.columns].sort_values('listing_id').reset_index(drop=True), check_dtype=False, check_exact=True)
+    elif not stored.empty:
+        raise ValueError('Unexpected stored observations in failed query')
+    listing_vins = dict(known_listing_vins)
+    vin_listings = {vin: listing for listing,vin in listing_vins.items()}
+    for page in pages:
+        if (page.get('http_status') != 200 or page.get('database_outcome') == 'unconfirmed'
+                or not page.get('request_started_at_utc') or not page.get('response_received_at_utc')):
+            raise ValueError('Uncertain response/storage outcome cannot be isolated')
+        journal = json.loads((Path(report_file).parent/'attempts'/f"{page['page']:04d}.json").read_text(encoding='utf-8'))
+        if any(journal.get(key) != value for key,value in page.items()):
+            raise ValueError('Page journal differs from final report')
+        request = build_search_request(filters=report['filters'],zip_code=report['zip_code'],
+            page=page['page'],location_filter=report.get('location_filter',False))
+        if journal['request'] != request:
+            raise ValueError('Failed request context differs from planned query')
+        source = verify_response_evidence(page['response_evidence'])
+        projection = project_response(source,request,observed_at=page['response_received_at_utc'])
+        frame = parse_capture(projection)  # Reject missing/invalid VINs and malformed rows.
+        for row in frame.itertuples():
+            if (row.listing_id in listing_vins and listing_vins[row.listing_id] != row.vin
+                    or row.vin in vin_listings and vin_listings[row.vin] != row.listing_id):
+                raise ValueError('Conflicting VIN/listing identity cannot be isolated')
+            listing_vins[row.listing_id] = row.vin
+            vin_listings[row.vin] = row.listing_id
+
+
 def collect_plan(queries, *, destination, target_listings=1000, budget=None, resume_from=None, post=None,
-                 full_plan=False, target_vins=None):
+                 full_plan=False, target_vins=None, isolate_pagination=False):
     """Count a union of identities, never a sum of ZIP/query totals.
 
     Resume references hash-checked completed queries. Incomplete queries restart at
@@ -94,6 +148,8 @@ def collect_plan(queries, *, destination, target_listings=1000, budget=None, res
     The capture window can span both invocations. This never certifies a daily census.
     """
     validate_plan(queries)
+    if type(isolate_pagination) is not bool or (isolate_pagination and (resume_from or not full_plan)):
+        raise ValueError('Pagination isolation requires an explicit boolean and a fresh full plan')
     if type(target_listings) is not int or target_listings < 1:
         raise ValueError('Require a positive integer target')
     if type(full_plan) is not bool:
@@ -158,6 +214,7 @@ def collect_plan(queries, *, destination, target_listings=1000, budget=None, res
                    pause_seconds=budget.pause_seconds, resumed_from=str(resume_from) if resume_from else None,
                    national_coverage_verified=False, daily_sales_estimate=None,
                    freshness_note='Generic plan/resume is not a fresh daily cycle; use the explicit windowed cycle runner.')
+    summary['isolate_pagination'] = isolate_pagination
     write_json_atomic(destination/'query_plan.json', dict(queries=queries))
     summary.update(outcomes=[], unique_listings=0, unique_vins=0, target_reached=False,
                    requests=request_count(), all_queries_complete=False, observation_started_utc=None, observation_ended_utc=None,
@@ -204,6 +261,7 @@ def collect_plan(queries, *, destination, target_listings=1000, budget=None, res
                              outcome_kind='unattempted', reason='Target reached or shared request/access budget stopped')
             else:
                 folder = destination/name
+                before_requests = budget.requests
                 report = collect_search(filters=q['filters'], zip_code=q['zip_code'], destination=folder,
                     target_listings=None if target_listings is None else target_listings-len(identities), budget=budget, post=send,
                     location_filter=q.get('location_filter', False), known_listing_ids=identities,
@@ -213,6 +271,12 @@ def collect_plan(queries, *, destination, target_listings=1000, budget=None, res
                 summary['identity_conflicts'].extend(conflict for page in report['pages']
                     for conflict in page.get('identity_conflicts', []))
                 entry = query_outcome(name, folder)
+                if isolate_pagination and report.get('outcome_kind') == 'pagination_unstable':
+                    verify_isolated_pagination(folder/'run_report.json', known_listing_vins=listing_vins,
+                        requests=budget.requests-before_requests)
+                    budget.isolate_query_failure(requests=budget.requests, report=folder/'run_report.json',
+                        report_sha256=entry['artifact_hashes'][str(folder/'run_report.json')])
+                    entry['failure_scope'] = 'query; pagination evidence reconciled'
             if 'database' in entry:
                 captures, rows = read_snapshots(entry['database'])
                 admitted = json.loads(Path(entry['report']).read_text(encoding='utf-8'))
@@ -238,8 +302,10 @@ def collect_plan(queries, *, destination, target_listings=1000, budget=None, res
             write_json_atomic(destination/'run_report.json', summary)
     summary.pop('active_query', None)
     summary['stop_reason'] = (next((entry.get('reason') for entry in outcomes
-                                  if entry.get('status') == 'blocked'), None)
+                                  if entry.get('status') == 'blocked' and not entry.get('failure_scope')), None)
         or ('target_reached' if summary['target_reached'] else
-            'all_queries_complete' if summary['all_queries_complete'] else 'request_or_time_budget_exhausted'))
+            'all_queries_complete' if summary['all_queries_complete'] else
+            'queries_finished_with_incomplete_coverage' if all(e.get('status') != 'unattempted' for e in outcomes)
+            else 'request_or_time_budget_exhausted'))
     write_json_atomic(destination/'run_report.json', summary)
     return summary

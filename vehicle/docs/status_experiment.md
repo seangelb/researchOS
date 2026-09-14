@@ -1,5 +1,9 @@
 # Carvana: notebook review and operating guide
 
+The [geographic coverage work](geographic_coverage.md) adds an opt-in, tested
+pagination-isolation path and an inactive ZIP experiment proposal. Existing
+scheduled daily settings and frozen study windows remain unchanged.
+
 Learn **00 → 10 → 11 → 20 → 24 → 30**. In routine use, review **20 and 24**;
 open 30 for quarterly assumptions and forecasts. Notebooks 21, 22 and 23 are
 intraday, original frozen-cohort and specialist references.

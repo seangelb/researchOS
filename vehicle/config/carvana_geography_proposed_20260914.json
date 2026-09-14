@@ -1,0 +1,1955 @@
+{
+  "status": "PROPOSED_NOT_AUTHORIZED_NOT_EXECUTED",
+  "prepared_at": "2026-09-14T00:39:31.281526+00:00",
+  "proposed_start": "2026-09-14T14:30:00+00:00",
+  "proposed_end": "2026-09-14T15:00:00+00:00",
+  "local_time": "September14 10:30-11:00 America/New_York",
+  "experiment": "geography_20260914T143000Z",
+  "max_requests": 300,
+  "max_seconds": 1800,
+  "minimum_spacing_seconds": 3,
+  "isolate_pagination": true,
+  "no_live_retry": true,
+  "contexts": [
+    {
+      "zip_code": "08542",
+      "city": "Princeton",
+      "role": "discovery"
+    },
+    {
+      "zip_code": "30303",
+      "city": "Atlanta",
+      "role": "discovery"
+    },
+    {
+      "zip_code": "60601",
+      "city": "Chicago",
+      "role": "discovery"
+    },
+    {
+      "zip_code": "75201",
+      "city": "Dallas",
+      "role": "discovery"
+    },
+    {
+      "zip_code": "85004",
+      "city": "Phoenix",
+      "role": "discovery"
+    },
+    {
+      "zip_code": "90012",
+      "city": "Los Angeles",
+      "role": "discovery"
+    },
+    {
+      "zip_code": "98101",
+      "city": "Seattle",
+      "role": "held_out"
+    },
+    {
+      "zip_code": "33130",
+      "city": "Miami",
+      "role": "held_out"
+    }
+  ],
+  "cohorts": [
+    {
+      "id": "q098_toyota_2022_camry",
+      "filters": {
+        "makes": [
+          {
+            "name": "Toyota",
+            "parentModels": [
+              {
+                "name": "Camry"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "historical_count": 42,
+      "count_vintage": "2026-09-12",
+      "query_report": "C:\\Users\\Sean\\VscProjects\\researchOS\\vehicle\\data\\experiments\\mvp_inventory_10k_acceptance_20260912\\q098_toyota_2022_camry\\run_report.json",
+      "query_report_sha256": "cb61f83a05f40ec0d999e11fa43d4ede08fac032eb59499f8d976fdb0b562909"
+    },
+    {
+      "id": "q099_chevrolet_2022_colorado",
+      "filters": {
+        "makes": [
+          {
+            "name": "Chevrolet",
+            "parentModels": [
+              {
+                "name": "Colorado"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "historical_count": 51,
+      "count_vintage": "2026-09-12",
+      "query_report": "C:\\Users\\Sean\\VscProjects\\researchOS\\vehicle\\data\\experiments\\mvp_inventory_10k_acceptance_20260912\\q099_chevrolet_2022_colorado\\run_report.json",
+      "query_report_sha256": "c0d1d63dff42fd29cbc1cae904c5cf4a4eb78290ec0030221f9e6974f9f9cbb0"
+    },
+    {
+      "id": "q100_ford_2023_bronco_sport",
+      "filters": {
+        "makes": [
+          {
+            "name": "Ford",
+            "parentModels": [
+              {
+                "name": "Bronco Sport"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "historical_count": 55,
+      "count_vintage": "2026-09-12",
+      "query_report": "C:\\Users\\Sean\\VscProjects\\researchOS\\vehicle\\data\\experiments\\mvp_inventory_10k_acceptance_20260912\\q100_ford_2023_bronco_sport\\run_report.json",
+      "query_report_sha256": "ee0bbeef05f8a075143374865918a416967bc4aab5eb4badc281f8c7bc62dd0a"
+    },
+    {
+      "id": "q092_volkswagen_2023_taos",
+      "filters": {
+        "makes": [
+          {
+            "name": "Volkswagen",
+            "parentModels": [
+              {
+                "name": "Taos"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "historical_count": 57,
+      "count_vintage": "2026-09-12",
+      "query_report": "C:\\Users\\Sean\\VscProjects\\researchOS\\vehicle\\data\\experiments\\mvp_inventory_10k_acceptance_20260912\\q092_volkswagen_2023_taos\\run_report.json",
+      "query_report_sha256": "42f5e6f2cfadd423329eaa8d0d0e1c6f78c4dbcb8a2c46c6c0a784f0b16841a6"
+    }
+  ],
+  "planning_requests_if_old_counts_unchanged": 198,
+  "planning_limitations": "Old counts fromoneZIP are budget assumptions, not predictions. ZIP serviceability/echo and complete membership must be checked live. Stop atshared cap andretain unattempted comparisons. Held-out contexts validate coverage without selecting discovery ZIPs. Reversed ordering and anchor repeats diagnose time drift, not an atomic snapshot.",
+  "query_table_source": "C:\\Users\\Sean\\VscProjects\\researchOS\\vehicle\\data\\experiments\\mvp_completion_20260912\\scale_acceptance_20260912\\queries.csv",
+  "query_table_sha256": "c966395ebd4ec5c706e60db9a67966258a389f5c299436cca08085ee695360f8",
+  "queries": [
+    {
+      "query_id": "p1_c1_08542",
+      "zip_code": "08542",
+      "filters": {
+        "makes": [
+          {
+            "name": "Toyota",
+            "parentModels": [
+              {
+                "name": "Camry"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q098_toyota_2022_camry",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c1_30303",
+      "zip_code": "30303",
+      "filters": {
+        "makes": [
+          {
+            "name": "Toyota",
+            "parentModels": [
+              {
+                "name": "Camry"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q098_toyota_2022_camry",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c1_60601",
+      "zip_code": "60601",
+      "filters": {
+        "makes": [
+          {
+            "name": "Toyota",
+            "parentModels": [
+              {
+                "name": "Camry"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q098_toyota_2022_camry",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c1_75201",
+      "zip_code": "75201",
+      "filters": {
+        "makes": [
+          {
+            "name": "Toyota",
+            "parentModels": [
+              {
+                "name": "Camry"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q098_toyota_2022_camry",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c1_85004",
+      "zip_code": "85004",
+      "filters": {
+        "makes": [
+          {
+            "name": "Toyota",
+            "parentModels": [
+              {
+                "name": "Camry"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q098_toyota_2022_camry",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c1_90012",
+      "zip_code": "90012",
+      "filters": {
+        "makes": [
+          {
+            "name": "Toyota",
+            "parentModels": [
+              {
+                "name": "Camry"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q098_toyota_2022_camry",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c1_98101",
+      "zip_code": "98101",
+      "filters": {
+        "makes": [
+          {
+            "name": "Toyota",
+            "parentModels": [
+              {
+                "name": "Camry"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q098_toyota_2022_camry",
+      "context_role": "held_out",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c1_33130",
+      "zip_code": "33130",
+      "filters": {
+        "makes": [
+          {
+            "name": "Toyota",
+            "parentModels": [
+              {
+                "name": "Camry"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q098_toyota_2022_camry",
+      "context_role": "held_out",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c1_08542_anchor_repeat",
+      "zip_code": "08542",
+      "filters": {
+        "makes": [
+          {
+            "name": "Toyota",
+            "parentModels": [
+              {
+                "name": "Camry"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q098_toyota_2022_camry",
+      "context_role": "discovery",
+      "anchor_repeat": true
+    },
+    {
+      "query_id": "p1_c2_30303",
+      "zip_code": "30303",
+      "filters": {
+        "makes": [
+          {
+            "name": "Chevrolet",
+            "parentModels": [
+              {
+                "name": "Colorado"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q099_chevrolet_2022_colorado",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c2_60601",
+      "zip_code": "60601",
+      "filters": {
+        "makes": [
+          {
+            "name": "Chevrolet",
+            "parentModels": [
+              {
+                "name": "Colorado"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q099_chevrolet_2022_colorado",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c2_75201",
+      "zip_code": "75201",
+      "filters": {
+        "makes": [
+          {
+            "name": "Chevrolet",
+            "parentModels": [
+              {
+                "name": "Colorado"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q099_chevrolet_2022_colorado",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c2_85004",
+      "zip_code": "85004",
+      "filters": {
+        "makes": [
+          {
+            "name": "Chevrolet",
+            "parentModels": [
+              {
+                "name": "Colorado"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q099_chevrolet_2022_colorado",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c2_90012",
+      "zip_code": "90012",
+      "filters": {
+        "makes": [
+          {
+            "name": "Chevrolet",
+            "parentModels": [
+              {
+                "name": "Colorado"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q099_chevrolet_2022_colorado",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c2_98101",
+      "zip_code": "98101",
+      "filters": {
+        "makes": [
+          {
+            "name": "Chevrolet",
+            "parentModels": [
+              {
+                "name": "Colorado"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q099_chevrolet_2022_colorado",
+      "context_role": "held_out",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c2_33130",
+      "zip_code": "33130",
+      "filters": {
+        "makes": [
+          {
+            "name": "Chevrolet",
+            "parentModels": [
+              {
+                "name": "Colorado"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q099_chevrolet_2022_colorado",
+      "context_role": "held_out",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c2_08542",
+      "zip_code": "08542",
+      "filters": {
+        "makes": [
+          {
+            "name": "Chevrolet",
+            "parentModels": [
+              {
+                "name": "Colorado"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q099_chevrolet_2022_colorado",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c2_08542_anchor_repeat",
+      "zip_code": "08542",
+      "filters": {
+        "makes": [
+          {
+            "name": "Chevrolet",
+            "parentModels": [
+              {
+                "name": "Colorado"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q099_chevrolet_2022_colorado",
+      "context_role": "discovery",
+      "anchor_repeat": true
+    },
+    {
+      "query_id": "p1_c3_60601",
+      "zip_code": "60601",
+      "filters": {
+        "makes": [
+          {
+            "name": "Ford",
+            "parentModels": [
+              {
+                "name": "Bronco Sport"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q100_ford_2023_bronco_sport",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c3_75201",
+      "zip_code": "75201",
+      "filters": {
+        "makes": [
+          {
+            "name": "Ford",
+            "parentModels": [
+              {
+                "name": "Bronco Sport"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q100_ford_2023_bronco_sport",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c3_85004",
+      "zip_code": "85004",
+      "filters": {
+        "makes": [
+          {
+            "name": "Ford",
+            "parentModels": [
+              {
+                "name": "Bronco Sport"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q100_ford_2023_bronco_sport",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c3_90012",
+      "zip_code": "90012",
+      "filters": {
+        "makes": [
+          {
+            "name": "Ford",
+            "parentModels": [
+              {
+                "name": "Bronco Sport"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q100_ford_2023_bronco_sport",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c3_98101",
+      "zip_code": "98101",
+      "filters": {
+        "makes": [
+          {
+            "name": "Ford",
+            "parentModels": [
+              {
+                "name": "Bronco Sport"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q100_ford_2023_bronco_sport",
+      "context_role": "held_out",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c3_33130",
+      "zip_code": "33130",
+      "filters": {
+        "makes": [
+          {
+            "name": "Ford",
+            "parentModels": [
+              {
+                "name": "Bronco Sport"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q100_ford_2023_bronco_sport",
+      "context_role": "held_out",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c3_08542",
+      "zip_code": "08542",
+      "filters": {
+        "makes": [
+          {
+            "name": "Ford",
+            "parentModels": [
+              {
+                "name": "Bronco Sport"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q100_ford_2023_bronco_sport",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c3_30303",
+      "zip_code": "30303",
+      "filters": {
+        "makes": [
+          {
+            "name": "Ford",
+            "parentModels": [
+              {
+                "name": "Bronco Sport"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q100_ford_2023_bronco_sport",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c3_08542_anchor_repeat",
+      "zip_code": "08542",
+      "filters": {
+        "makes": [
+          {
+            "name": "Ford",
+            "parentModels": [
+              {
+                "name": "Bronco Sport"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q100_ford_2023_bronco_sport",
+      "context_role": "discovery",
+      "anchor_repeat": true
+    },
+    {
+      "query_id": "p1_c4_75201",
+      "zip_code": "75201",
+      "filters": {
+        "makes": [
+          {
+            "name": "Volkswagen",
+            "parentModels": [
+              {
+                "name": "Taos"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q092_volkswagen_2023_taos",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c4_85004",
+      "zip_code": "85004",
+      "filters": {
+        "makes": [
+          {
+            "name": "Volkswagen",
+            "parentModels": [
+              {
+                "name": "Taos"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q092_volkswagen_2023_taos",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c4_90012",
+      "zip_code": "90012",
+      "filters": {
+        "makes": [
+          {
+            "name": "Volkswagen",
+            "parentModels": [
+              {
+                "name": "Taos"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q092_volkswagen_2023_taos",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c4_98101",
+      "zip_code": "98101",
+      "filters": {
+        "makes": [
+          {
+            "name": "Volkswagen",
+            "parentModels": [
+              {
+                "name": "Taos"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q092_volkswagen_2023_taos",
+      "context_role": "held_out",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c4_33130",
+      "zip_code": "33130",
+      "filters": {
+        "makes": [
+          {
+            "name": "Volkswagen",
+            "parentModels": [
+              {
+                "name": "Taos"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q092_volkswagen_2023_taos",
+      "context_role": "held_out",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c4_08542",
+      "zip_code": "08542",
+      "filters": {
+        "makes": [
+          {
+            "name": "Volkswagen",
+            "parentModels": [
+              {
+                "name": "Taos"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q092_volkswagen_2023_taos",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c4_30303",
+      "zip_code": "30303",
+      "filters": {
+        "makes": [
+          {
+            "name": "Volkswagen",
+            "parentModels": [
+              {
+                "name": "Taos"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q092_volkswagen_2023_taos",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c4_60601",
+      "zip_code": "60601",
+      "filters": {
+        "makes": [
+          {
+            "name": "Volkswagen",
+            "parentModels": [
+              {
+                "name": "Taos"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q092_volkswagen_2023_taos",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p1_c4_08542_anchor_repeat",
+      "zip_code": "08542",
+      "filters": {
+        "makes": [
+          {
+            "name": "Volkswagen",
+            "parentModels": [
+              {
+                "name": "Taos"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 1,
+      "cohort": "q092_volkswagen_2023_taos",
+      "context_role": "discovery",
+      "anchor_repeat": true
+    },
+    {
+      "query_id": "p2_c1_33130",
+      "zip_code": "33130",
+      "filters": {
+        "makes": [
+          {
+            "name": "Toyota",
+            "parentModels": [
+              {
+                "name": "Camry"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q098_toyota_2022_camry",
+      "context_role": "held_out",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c1_98101",
+      "zip_code": "98101",
+      "filters": {
+        "makes": [
+          {
+            "name": "Toyota",
+            "parentModels": [
+              {
+                "name": "Camry"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q098_toyota_2022_camry",
+      "context_role": "held_out",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c1_90012",
+      "zip_code": "90012",
+      "filters": {
+        "makes": [
+          {
+            "name": "Toyota",
+            "parentModels": [
+              {
+                "name": "Camry"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q098_toyota_2022_camry",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c1_85004",
+      "zip_code": "85004",
+      "filters": {
+        "makes": [
+          {
+            "name": "Toyota",
+            "parentModels": [
+              {
+                "name": "Camry"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q098_toyota_2022_camry",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c1_75201",
+      "zip_code": "75201",
+      "filters": {
+        "makes": [
+          {
+            "name": "Toyota",
+            "parentModels": [
+              {
+                "name": "Camry"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q098_toyota_2022_camry",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c1_60601",
+      "zip_code": "60601",
+      "filters": {
+        "makes": [
+          {
+            "name": "Toyota",
+            "parentModels": [
+              {
+                "name": "Camry"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q098_toyota_2022_camry",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c1_30303",
+      "zip_code": "30303",
+      "filters": {
+        "makes": [
+          {
+            "name": "Toyota",
+            "parentModels": [
+              {
+                "name": "Camry"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q098_toyota_2022_camry",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c1_08542",
+      "zip_code": "08542",
+      "filters": {
+        "makes": [
+          {
+            "name": "Toyota",
+            "parentModels": [
+              {
+                "name": "Camry"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q098_toyota_2022_camry",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c1_08542_anchor_repeat",
+      "zip_code": "08542",
+      "filters": {
+        "makes": [
+          {
+            "name": "Toyota",
+            "parentModels": [
+              {
+                "name": "Camry"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q098_toyota_2022_camry",
+      "context_role": "discovery",
+      "anchor_repeat": true
+    },
+    {
+      "query_id": "p2_c2_08542",
+      "zip_code": "08542",
+      "filters": {
+        "makes": [
+          {
+            "name": "Chevrolet",
+            "parentModels": [
+              {
+                "name": "Colorado"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q099_chevrolet_2022_colorado",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c2_33130",
+      "zip_code": "33130",
+      "filters": {
+        "makes": [
+          {
+            "name": "Chevrolet",
+            "parentModels": [
+              {
+                "name": "Colorado"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q099_chevrolet_2022_colorado",
+      "context_role": "held_out",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c2_98101",
+      "zip_code": "98101",
+      "filters": {
+        "makes": [
+          {
+            "name": "Chevrolet",
+            "parentModels": [
+              {
+                "name": "Colorado"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q099_chevrolet_2022_colorado",
+      "context_role": "held_out",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c2_90012",
+      "zip_code": "90012",
+      "filters": {
+        "makes": [
+          {
+            "name": "Chevrolet",
+            "parentModels": [
+              {
+                "name": "Colorado"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q099_chevrolet_2022_colorado",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c2_85004",
+      "zip_code": "85004",
+      "filters": {
+        "makes": [
+          {
+            "name": "Chevrolet",
+            "parentModels": [
+              {
+                "name": "Colorado"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q099_chevrolet_2022_colorado",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c2_75201",
+      "zip_code": "75201",
+      "filters": {
+        "makes": [
+          {
+            "name": "Chevrolet",
+            "parentModels": [
+              {
+                "name": "Colorado"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q099_chevrolet_2022_colorado",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c2_60601",
+      "zip_code": "60601",
+      "filters": {
+        "makes": [
+          {
+            "name": "Chevrolet",
+            "parentModels": [
+              {
+                "name": "Colorado"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q099_chevrolet_2022_colorado",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c2_30303",
+      "zip_code": "30303",
+      "filters": {
+        "makes": [
+          {
+            "name": "Chevrolet",
+            "parentModels": [
+              {
+                "name": "Colorado"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q099_chevrolet_2022_colorado",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c2_08542_anchor_repeat",
+      "zip_code": "08542",
+      "filters": {
+        "makes": [
+          {
+            "name": "Chevrolet",
+            "parentModels": [
+              {
+                "name": "Colorado"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2022,
+          "min": 2022
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q099_chevrolet_2022_colorado",
+      "context_role": "discovery",
+      "anchor_repeat": true
+    },
+    {
+      "query_id": "p2_c3_30303",
+      "zip_code": "30303",
+      "filters": {
+        "makes": [
+          {
+            "name": "Ford",
+            "parentModels": [
+              {
+                "name": "Bronco Sport"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q100_ford_2023_bronco_sport",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c3_08542",
+      "zip_code": "08542",
+      "filters": {
+        "makes": [
+          {
+            "name": "Ford",
+            "parentModels": [
+              {
+                "name": "Bronco Sport"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q100_ford_2023_bronco_sport",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c3_33130",
+      "zip_code": "33130",
+      "filters": {
+        "makes": [
+          {
+            "name": "Ford",
+            "parentModels": [
+              {
+                "name": "Bronco Sport"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q100_ford_2023_bronco_sport",
+      "context_role": "held_out",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c3_98101",
+      "zip_code": "98101",
+      "filters": {
+        "makes": [
+          {
+            "name": "Ford",
+            "parentModels": [
+              {
+                "name": "Bronco Sport"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q100_ford_2023_bronco_sport",
+      "context_role": "held_out",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c3_90012",
+      "zip_code": "90012",
+      "filters": {
+        "makes": [
+          {
+            "name": "Ford",
+            "parentModels": [
+              {
+                "name": "Bronco Sport"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q100_ford_2023_bronco_sport",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c3_85004",
+      "zip_code": "85004",
+      "filters": {
+        "makes": [
+          {
+            "name": "Ford",
+            "parentModels": [
+              {
+                "name": "Bronco Sport"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q100_ford_2023_bronco_sport",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c3_75201",
+      "zip_code": "75201",
+      "filters": {
+        "makes": [
+          {
+            "name": "Ford",
+            "parentModels": [
+              {
+                "name": "Bronco Sport"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q100_ford_2023_bronco_sport",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c3_60601",
+      "zip_code": "60601",
+      "filters": {
+        "makes": [
+          {
+            "name": "Ford",
+            "parentModels": [
+              {
+                "name": "Bronco Sport"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q100_ford_2023_bronco_sport",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c3_08542_anchor_repeat",
+      "zip_code": "08542",
+      "filters": {
+        "makes": [
+          {
+            "name": "Ford",
+            "parentModels": [
+              {
+                "name": "Bronco Sport"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q100_ford_2023_bronco_sport",
+      "context_role": "discovery",
+      "anchor_repeat": true
+    },
+    {
+      "query_id": "p2_c4_60601",
+      "zip_code": "60601",
+      "filters": {
+        "makes": [
+          {
+            "name": "Volkswagen",
+            "parentModels": [
+              {
+                "name": "Taos"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q092_volkswagen_2023_taos",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c4_30303",
+      "zip_code": "30303",
+      "filters": {
+        "makes": [
+          {
+            "name": "Volkswagen",
+            "parentModels": [
+              {
+                "name": "Taos"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q092_volkswagen_2023_taos",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c4_08542",
+      "zip_code": "08542",
+      "filters": {
+        "makes": [
+          {
+            "name": "Volkswagen",
+            "parentModels": [
+              {
+                "name": "Taos"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q092_volkswagen_2023_taos",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c4_33130",
+      "zip_code": "33130",
+      "filters": {
+        "makes": [
+          {
+            "name": "Volkswagen",
+            "parentModels": [
+              {
+                "name": "Taos"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q092_volkswagen_2023_taos",
+      "context_role": "held_out",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c4_98101",
+      "zip_code": "98101",
+      "filters": {
+        "makes": [
+          {
+            "name": "Volkswagen",
+            "parentModels": [
+              {
+                "name": "Taos"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q092_volkswagen_2023_taos",
+      "context_role": "held_out",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c4_90012",
+      "zip_code": "90012",
+      "filters": {
+        "makes": [
+          {
+            "name": "Volkswagen",
+            "parentModels": [
+              {
+                "name": "Taos"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q092_volkswagen_2023_taos",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c4_85004",
+      "zip_code": "85004",
+      "filters": {
+        "makes": [
+          {
+            "name": "Volkswagen",
+            "parentModels": [
+              {
+                "name": "Taos"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q092_volkswagen_2023_taos",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c4_75201",
+      "zip_code": "75201",
+      "filters": {
+        "makes": [
+          {
+            "name": "Volkswagen",
+            "parentModels": [
+              {
+                "name": "Taos"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q092_volkswagen_2023_taos",
+      "context_role": "discovery",
+      "anchor_repeat": false
+    },
+    {
+      "query_id": "p2_c4_08542_anchor_repeat",
+      "zip_code": "08542",
+      "filters": {
+        "makes": [
+          {
+            "name": "Volkswagen",
+            "parentModels": [
+              {
+                "name": "Taos"
+              }
+            ]
+          }
+        ],
+        "year": {
+          "max": 2023,
+          "min": 2023
+        }
+      },
+      "location_filter": false,
+      "pass": 2,
+      "cohort": "q092_volkswagen_2023_taos",
+      "context_role": "discovery",
+      "anchor_repeat": true
+    }
+  ]
+}

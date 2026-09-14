@@ -40,6 +40,12 @@ class NavigationBudget:
     def stop(self):
         self.stopped = True
 
+    def isolate_query_failure(self, *, requests, report, report_sha256):
+        """Called only after the plan reconciles a pagination-only child failure."""
+        if not self.stopped or self.requests != requests:
+            raise ValueError('Query isolation budget changed; cannot continue')
+        self.stopped = False  # Counts, original deadline and last-start spacing remain.
+
     def response_received(self):
         """In-memory budgets have no response checkpoint."""
 
