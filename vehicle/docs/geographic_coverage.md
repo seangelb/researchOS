@@ -75,9 +75,17 @@ by this document or implied by the earlier daily-panel heartbeat.
 
 ## Work still required
 
-Prepare notebook-visible comparisons before authorizing the pilot: per-query
-coverage, pass/ZIP intersections and unions, incremental VINs, held-out additions,
-price versus delivery-cost differences, anchor drift and capture time spans.
+Notebook 20 now exposes per-query coverage, pass/ZIP intersections and unions,
+incremental VINs, held-out additions, price versus delivery-cost differences,
+anchor drift and capture time spans. Its geography settings select the inactive
+proposal and read retained evidence only. Comparisons require complete queries,
+source/SQLite parity and captures within the proposed window; missing queries
+remain unknown. Exported tables include context observations and source paths.
+Review these tables before authorizing the pilot.
+The geography reader/comparison checkpoint passed the 1,096-test vehicle suite,
+then all 13 final focused geography tests, including source corruption, SQLite
+differences, offline guards, cutoffs, repeat comparisons and held-out separation.
+All nine vehicle notebooks passed offline. No live requests were made.
 An incomplete query cannot support absence or geographic exclusion. Identical
 counts alone cannot establish identical membership or an atomic snapshot.
 
