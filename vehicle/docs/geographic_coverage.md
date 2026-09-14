@@ -32,8 +32,45 @@ checkout in `C:\Users\Sean\Documents\ChatGPT\ResearchOS\carvana_coverage_impleme
 
 ## Concrete proposed ZIP experiment
 
-The canonical [proposed manifest](../config/carvana_geography_proposed_20260914.json)
-is **not authorized or executed**. It proposes September 14, 2026, 10:30–11:00 New York,
+The user subsequently approved this design, then explicitly moved execution to
+September 13 New York (September 14 UTC). The new immutable
+[authorized manifest](../config/carvana_geography_authorized_20260913.json) retains
+the exact 72 queries and limits, and uses a separate destination
+`vehicle/data/experiments/geography_20260914T010100Z`, window 01:01–01:31 UTC.
+Notebook 20 now selects that manifest. The original September 14 proposal below
+is retained as design history; its future pilot wake was removed to avoid a
+duplicate run. The original failed September 13 daily cycle remains unchanged.
+
+### September 13 pilot result
+
+All 72 queries completed in 198 requests and 595.812 seconds, from 21:01 to
+21:10:56 New York. Source replay and exact SQLite agreement passed for every
+query. The minimum observed request-start gap was 3.006318 seconds. There were
+201 distinct VINs in 3,618 retained query-context observations: 44 Camry, 49
+Colorado, 56 Bronco Sport and 52 Taos.
+
+All 96 ZIP/anchor/repeated-pass comparisons had identical VIN membership.
+Both held-out ZIPs added zero VINs in every cohort/pass. Matched asking prices
+did not differ. Delivery costs varied for 194 VINs; 126 delivery-cost observations
+were missing and remain unknown. The capture spans approximately ten minutes,
+not an atomic snapshot.
+
+This is evidence of identical visible membership in these four cohorts during
+this experiment, not proof that one ZIP covers Carvana nationally. No pagination
+failure occurred in this live pilot, so failure isolation was not exercised here;
+its evidence remains the earlier retained-failure replay and offline tests.
+The original 101-query September 13 daily run is still partial. This pilot does
+not replace its vintage, complete the 10k panel, or establish a seven-date baseline.
+
+The dated reconciliation and Notebook 20 export are in
+`C:\Users\Sean\Documents\ChatGPT\ResearchOS\carvana_geographic_review_20260913\tonight_reconciled`
+and `notebook20_live_pilot` beside it. Broader category coverage and a measured
+full-inventory budget remain the next design step; the existing daily cap stays
+600 requests.
+
+The original [proposed manifest](../config/carvana_geography_proposed_20260914.json)
+is retained as historical design evidence and superseded for execution by the
+authorized September 13 manifest above. It proposed September 14, 2026, 10:30–11:00 New York,
 destination `vehicle/data/experiments/geography_20260914T143000Z`, maximum 300 requests,
 1,800 seconds and minimum 3 seconds between starts. An expired proposal requires a new
 dated plan; it cannot be silently rescheduled or executed as an old vintage.
