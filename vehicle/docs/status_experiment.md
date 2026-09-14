@@ -4,13 +4,14 @@ Learn **00 → 10 → 11 → 20 → 24 → 30**. In routine use, review **20 and
 open 30 for quarterly assumptions and forecasts. Notebooks 21, 22 and 23 are
 intraday, original frozen-cohort and specialist references.
 
-The [September 13 review checkpoint](checkpoint_20260913.md) records the one
-new native status observation, the stopped browser batch, the deferred broader
-daily baseline, and the cutoff to select when reviewing the latest evidence.
+The [approved continuation](resume_20260913.md) records the finished 12-visit batch,
+27 matched primary checks, and the first broader-panel attempt, which stopped on
+unstable pagination. It gives the latest cutoff and scheduled follow-ups. The
+[earlier review checkpoint](checkpoint_20260913.md) preserves the temporary pause.
 
 Normal **Restart Kernel and Run All is offline and read-only**. Notebook 11's
 live function is defined but never invoked by default. Collection is a separate
-deliberate action; the proposed operating dates are not a scheduler.
+deliberate action; the approved continuation uses a separate app heartbeat.
 
 For the research question, populations, row keys, table contracts and function
 flow, start with the [code walkthrough](code_walkthrough.md). This document is
@@ -263,9 +264,11 @@ The preserved [seven-date plan](../data/experiments/mvp_completion_20260912/scal
 uses all **101 query definitions in their original order**, ZIP 08542, location
 filtering off, America/New_York time and **600 requests/60 minutes per date**.
 It completes the declared scope rather than stopping at a moving 10,000-VIN target.
-Proposed dates are **September 13–19, 2026, at 09:00 ±15 minutes**. These are
-unexecuted/unapproved future cycles, not a scheduler. The CLI uses the actual
-invocation date/window and does not enforce the proposed schedule itself.
+The original proposal used **September 13–19, 2026, at 09:00 ±15 minutes**.
+The [approved continuation](resume_20260913.md) retains those dates and query bytes
+but explicitly schedules **20:00 ±15 minutes**. September 13 is a retained partial
+attempt; the remaining dates are future work. The CLI uses the actual invocation
+date/window; schedule and once-per-date checks belong to the heartbeat preflight.
 
 On failure, rerun the same preview and inspect the retained cycle/page records.
 After reviewing the exact finished evidence and population, intentional offline
@@ -359,8 +362,7 @@ For current offline software checks, run:
 .\.venv\Scripts\python.exe -B scripts/check_notebooks.py
 ```
 
-The smallest next step is an offline notebook walkthrough, then separately
-authorized operation under the unchanged seven-date plan. Record every date,
+The notebook review is approved and bounded operation is underway. Record every date,
 coverage/budget failure, export and measured effort; require 7/7 comparable planned
 dates before claiming the operating validation passed. Status outcomes and future
 quarterly earnings remain external validation milestones. Tests establish software

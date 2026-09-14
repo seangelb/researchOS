@@ -51,14 +51,18 @@ Read the opening population definitions in the
 Notebook 20 defaults to the original Tesla panel. To reproduce the retained
 September 11/12 inventory and price example, use the explicit two-cycle selection
 in the [operating guide](vehicle/docs/status_experiment.md#notebook-20-population-inventory-and-asking-prices).
-The separate 101-query proposal has no operating baseline at this checkpoint;
-the earlier 10,000-VIN trial is capacity evidence. Keep those populations separate.
+The separate 101-query panel's first operating attempt is partial: six complete
+queries and 1,284 observed VINs, with no complete baseline. The earlier 10,000-VIN
+trial is capacity evidence. Use the [approved continuation record](vehicle/docs/resume_20260913.md)
+for the broader-panel settings and its seven-date calendar. Keep those populations separate.
 
 Notebook 24's ordinary `STUDY` setting selects the frozen study. `AS_OF` controls
 which retained checks are visible; an older cutoff will exclude later evidence.
-For the [September 13 checkpoint](vehicle/docs/checkpoint_20260913.md), keep the
-existing study and set `AS_OF = '2026-09-13T23:39:33.757066+00:00'` before running.
-Optionally set `EXAMPLE_VIN = '5YJ3E1EA0LF611240'` to trace the newly retained check.
+For the latest [approved continuation](vehicle/docs/resume_20260913.md), keep the
+existing study and set `AS_OF = '2026-09-14T00:07:09.134064+00:00'` before running.
+There are 27 identity-matched primary checks and five unvisited VINs; one matched
+check still has an unresolved binary endpoint. The [earlier checkpoint](vehicle/docs/checkpoint_20260913.md)
+keeps its original cutoff for historical replay.
 Notebook 22 is the original legacy capture reference and does not automatically
 incorporate newer detail batches. Notebooks 21–23 can wait until after this pass.
 
@@ -75,5 +79,5 @@ goes beyond the evidence. Save setting edits deliberately; do not overwrite
 retained captures or historical approvals during review.
 
 The first goal is to understand and challenge one complete source-to-conclusion
-path in each project. Further live observations and the multi-day trial remain
-separate operating work after this review checkpoint.
+path in each project. The user has approved this review. Remaining dated
+observations are scheduled operating work; they are not completed evidence.

@@ -117,7 +117,8 @@ def test_folder_without_checkpoint_is_visible_not_a_zero(settings):
     assert pd.isna(rows.iloc[0].requests) and pd.isna(rows.iloc[0].observed_vins)
 
 
-def test_notebook_calendar_keeps_planned_missing_and_measured_zero_separate(settings, response_data, clock):
+@pytest.mark.parametrize('planned_time', [None, '20:00:00'])
+def test_notebook_calendar_keeps_planned_missing_and_measured_zero_separate(settings, response_data, clock, planned_time):
     from test_daily_notebook import checker
     daily.run_tracking(settings, live=True, post=Mock(return_value=reply(response_data)))
     proposal = settings['config_path'].parent / 'proposal.json'
@@ -125,15 +126,23 @@ def test_notebook_calendar_keeps_planned_missing_and_measured_zero_separate(sett
         bindings={key: dict(path=str(settings[field]), sha256=daily.digest(settings[field]))
                   for key, field in [('config', 'config_path'), ('query_plan', 'plan')]},
         planned_local_dates=['2026-09-08', '2026-09-09', '2026-09-10'], scope_id='synthetic test scope')))
+    if planned_time is not None:
+        plan = json.loads(proposal.read_text())
+        plan['planned_local_time'] = planned_time
+        proposal.write_text(json.dumps(plan))
     book = Path(__file__).parents[1] / 'notebooks/20_carvana_history_analysis.ipynb'
     code = {c['id']: ''.join(c['source']) for c in json.loads(book.read_text(encoding='utf-8'))['cells']}
     scope = dict(pd=pd, Path=Path, json=json, display=lambda *args: None,
         tracking_settings=daily.tracking_settings, PLANNED_VALIDATION=proposal,
-        AS_OF='2026-09-09T23:00:00Z', OPERATOR_MINUTES_BY_DATE={'2026-09-08': 0})
+        AS_OF='2026-09-10T02:00:00Z', OPERATOR_MINUTES_BY_DATE={'2026-09-08': 0})
     with checker.offline_guards():
         for name in ['planned-operating-inputs', 'planned-date-review']:
             exec(compile(code[name], name, 'exec'), scope)
     rows = scope['planned_date_review'].set_index('planned_date')
+    assert rows.planned_start.dt.hour.eq(20 if planned_time else 9).all()
+    expected_offset = (rows.loc['2026-09-08', 'actual_start_local']
+                       - pd.Timestamp('2026-09-08 ' + (planned_time or '09:00:00'), tz=settings['timezone'])).total_seconds() / 60
+    assert rows.loc['2026-09-08', 'start_offset_minutes'] == expected_offset
     assert rows.collection_status.tolist() == ['complete', 'missing at cutoff', 'planned; not yet due']
     assert rows.loc['2026-09-08', 'active_operator_minutes'] == 0
     assert rows.loc['2026-09-08', 'effort_status'] == 'analyst supplied measurement'
@@ -147,6 +156,11 @@ def test_notebook_calendar_keeps_planned_missing_and_measured_zero_separate(sett
     unknown = scope['planned_date_review'].set_index('planned_date').loc['2026-09-09']
     assert unknown.collection_status == 'missing cycle metadata'
     assert pd.isna(unknown.within_15_minute_start_window)
+    scope['AS_OF'] = '2026-08-31T23:00:00Z'
+    with checker.offline_guards():
+        for name in ['planned-operating-inputs', 'planned-date-review']:
+            exec(compile(code[name], name, 'exec'), scope)
+    assert scope['planned_date_review'].empty
 
 
 def test_mid_request_cutoff_keeps_attempt_total_unknown():
