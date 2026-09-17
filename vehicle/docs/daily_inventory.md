@@ -9,6 +9,17 @@ evidence, imports observations into SQLite, registers the date, and writes table
 Notebook 20 starts with those tables and remains offline/read-only. The first day
 is a baseline; it cannot tell us how many vehicles sold that day.
 
+Fresh daily captures now continue to independent queries after a pagination-only
+failure has been reconciled against retained responses, page journals, identities,
+and SQLite. The affected query stays incomplete and failed-page rows stay excluded;
+the full daily inventory count remains unavailable until every query completes.
+Request counts, spacing, and the original time limit continue unchanged. Access
+blocks, uncertain requests, identity conflicts, and unreconciled evidence still stop
+the run. This policy is visible in the preview and retained cycle. Incomplete cycles
+using this policy cannot be resumed automatically. A separately authorized fresh
+same-date capture needs a separate configuration and destination, preserving the
+original date register and failed evidence.
+
 ## Review retained history
 
 Open Notebook 20 and Run All using the settings in the operating guide. Edit

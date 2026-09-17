@@ -1,0 +1,13 @@
+{
+  "plan": "data/experiments/mvp_completion_20260912/scale_acceptance_20260912/config/proposed_daily_queries.json",
+  "timezone": "America/New_York",
+  "capture_root": "data/experiments/daily_recovery_20260916/captures",
+  "database": "data/experiments/daily_recovery_20260916/analysis/history.sqlite",
+  "register": "data/experiments/daily_recovery_20260916/analysis/cycles.json",
+  "exports": "data/experiments/daily_recovery_20260916/analysis/tables",
+  "checks": "data/experiments/daily_recovery_20260916/analysis/listing_checks.csv",
+  "reviews": "data/experiments/daily_recovery_20260916/analysis/candidate_reviews.csv",
+  "max_requests": 600,
+  "max_seconds": 3600,
+  "followup_limit": 12
+}

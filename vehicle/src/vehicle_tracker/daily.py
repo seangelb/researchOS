@@ -94,6 +94,7 @@ def preview(settings, *, now=None):
         window_start=now.isoformat(), window_end=(now + timedelta(seconds=settings['max_seconds'])).isoformat(),
         max_requests=settings['max_requests'], max_seconds=settings['max_seconds'])
     config['destination'] = str(settings['capture_root'] / day)
+    config['isolate_pagination'] = True
     return config
 
 
@@ -167,6 +168,8 @@ def recovery_candidates(settings, *, now=None):
                 reason = 'Date already registered with different evidence; review only'
             elif cycle_state['coverage_complete']:
                 reason = 'Complete retained cycle; no requests needed'
+            elif cycle_state.get('isolate_pagination') or cycle_state.get('isolated_query_failures'):
+                reason = 'Pagination-isolated cycle cannot resume; retain its incomplete coverage'
             elif diagnostic['request_outcome_uncertain']:
                 reason = 'Retained request outcome uncertain; live resume blocked'
             elif cycle_state['budget']['pending_request']:
@@ -398,7 +401,8 @@ def run_tracking(settings, *, live=False, import_path=None, refresh=False, post=
             state = collect_cycle(settings['queries'], destination=config['destination'],
                 cycle_date=config['cycle_date'], timezone_name=settings['timezone'],
                 window_start=config['window_start'], window_end=config['window_end'],
-                max_requests=settings['max_requests'], max_seconds=settings['max_seconds'], post=post)
+                max_requests=settings['max_requests'], max_seconds=settings['max_seconds'], post=post,
+                isolate_pagination=config['isolate_pagination'])
             import_path = Path(config['destination']) / 'cycle.json'
         if import_path:
             state = register_cycle(settings, import_path)

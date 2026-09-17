@@ -11,6 +11,8 @@ from test_daily_cycles import clock, reply
 from test_daily_events import cycles, observations
 from test_search import response_data
 from vehicle_tracker import daily
+from test_query_isolation import pages
+from test_search_evidence import response
 
 
 @pytest.fixture
@@ -158,3 +160,76 @@ def test_alternative_same_day_cycle_is_not_silently_selected(settings, response_
     with pytest.raises(ValueError, match='already registered with different evidence'):
         daily.run_tracking(settings, import_path=other['capture_root'] / '2026-09-08/cycle.json')
     assert len(daily.registered_cycles(settings)) == 1
+
+
+@pytest.mark.parametrize('request_limit', [2, 3])
+def test_daily_pagination_failure_continues_within_durable_budget(settings, response_data, request_limit):
+    settings['queries'].append(dict(query_id='next', zip_code='08542', filters={}))
+    settings['max_requests'] = request_limit
+    first, second = pages(response_data)
+    independent = copy.deepcopy(response_data)
+    for row in independent['inventory']['vehicles']:
+        row['vehicleId'] += 10000
+        row['vin'] = row['vin'][:-1] + str((int(row['vin'][-1]) + 1) % 10)
+    post = Mock(side_effect=[response(first), response(second), response(independent)])
+    assert daily.preview(settings)['isolate_pagination'] is True
+    state, folder, tables = daily.run_tracking(settings, live=True, post=post)
+    path = settings['capture_root'] / '2026-09-08/cycle.json'
+    saved = json.loads(path.read_text())
+    parent = json.loads((path.parent / 'attempt_0001/run_report.json').read_text())
+    assert post.call_count == saved['budget']['requests'] == request_limit
+    assert saved['isolate_pagination'] and len(saved['isolated_query_failures']) == 1
+    assert not saved['budget']['stopped'] and not saved['budget']['pending_request']
+    assert parent['resumed_from'] is None and parent['isolate_pagination']
+    assert not state['coverage_complete'] and not parent['all_queries_complete']
+    assert parent['outcomes'][1]['query_complete'] is (request_limit == 3)
+    assert tables['daily_inventory'].iloc[0].coverage_status == 'partial'
+    assert pd.isna(tables['daily_inventory'].iloc[0].inventory_count)
+    assert pd.isna(tables['daily_inventory'].iloc[0].estimated_sales)
+    failed = json.loads((path.parent / 'attempt_0001/all/run_report.json').read_text())
+    assert failed['pages'][-1]['stored_rows'] == 0
+    assert (folder / 'manifest.json').is_file()
+    from vehicle_tracker.cycles import read_cycle_history, collect_cycle
+    for source, stored in zip(read_cycle_history([path]), read_cycle_history([path], settings['database'])):
+        if 'listing_id' in source:
+            keys = ['run_id', 'capture_id', 'listing_id']
+            source = source.sort_values(keys).reset_index(drop=True)
+            stored = stored.sort_values(keys).reset_index(drop=True)
+        pd.testing.assert_frame_equal(source, stored, check_dtype=False, check_exact=True)
+    retained = {p: p.read_bytes() for p in path.parent.rglob('*') if p.is_file()}
+    with pytest.raises(ValueError, match='cannot resume'):
+        collect_cycle(settings['queries'], destination=path.parent, cycle_date=saved['cycle_date'],
+            timezone_name=saved['timezone'], window_start=saved['window_start'], window_end=saved['window_end'],
+            max_requests=saved['max_requests'], max_seconds=saved['max_seconds'], resume=True, post=post)
+    assert post.call_count == request_limit
+    assert all(p.read_bytes() == content for p, content in retained.items())
+    # A removed policy marker must not erase the durable isolation record.
+    saved.pop('isolate_pagination')
+    path.write_text(json.dumps(saved))
+    with pytest.raises(ValueError, match='cannot resume'):
+        collect_cycle(settings['queries'], destination=path.parent, cycle_date=saved['cycle_date'],
+            timezone_name=saved['timezone'], window_start=saved['window_start'], window_end=saved['window_end'],
+            max_requests=saved['max_requests'], max_seconds=saved['max_seconds'], resume=True, post=post)
+    assert post.call_count == request_limit
+
+
+@pytest.mark.parametrize('failure', ['403', '429', 'identity', 'transport'])
+def test_daily_isolation_preserves_global_stops(settings, response_data, failure):
+    settings['queries'].extend(dict(query_id=name, zip_code='08542', filters={}) for name in ['next', 'last'])
+    first, second = pages(response_data)
+    if failure == 'identity':
+        second['inventory']['vehicles'][0]['vin'] = second['inventory']['vehicles'][1]['vin']
+        replies = [response(first), response(second)]
+    else:
+        third = TimeoutError('offline timeout') if failure == 'transport' else response(response_data, status=int(failure))
+        replies = [response(first), response(second), third]
+    post = Mock(side_effect=replies)
+    if failure == 'identity':
+        with pytest.raises(ValueError, match='identity'):
+            daily.run_tracking(settings, live=True, post=post)
+    else:
+        state, _, _ = daily.run_tracking(settings, live=True, post=post)
+        assert not state['coverage_complete']
+    saved = json.loads((settings['capture_root'] / '2026-09-08/cycle.json').read_text())
+    assert saved['budget']['stopped'] and post.call_count == len(replies)
+    assert saved['budget']['requests'] == len(replies)

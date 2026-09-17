@@ -51,6 +51,8 @@ def cycle_config(queries, *, cycle_date, timezone_name, window_start, window_end
 def _cycle_state(path):
     """Validate the frozen configuration and durable reservation before using either."""
     state = json.loads(Path(path).read_text(encoding='utf-8'))
+    if type(state.get('isolate_pagination', False)) is not bool:
+        raise ValueError('Invalid retained pagination isolation policy')
     config = cycle_config(state['queries'], cycle_date=state['cycle_date'], timezone_name=state['timezone'],
         window_start=state['window_start'], window_end=state['window_end'],
         max_requests=state['max_requests'], max_seconds=state['max_seconds'])
@@ -367,8 +369,10 @@ def cycle_diagnostic(path, *, now=None):
 
 
 def collect_cycle(queries, *, destination, cycle_date, timezone_name, window_start, window_end,
-                  max_requests=120, max_seconds=1200, resume=False, post=None):
+                  max_requests=120, max_seconds=1200, resume=False, post=None, isolate_pagination=False):
     """Collect the whole declared plan in a bounded daily window; no implicit retries."""
+    if type(isolate_pagination) is not bool or (resume and isolate_pagination):
+        raise ValueError('Pagination isolation requires a fresh cycle and an explicit boolean')
     config = cycle_config(queries,cycle_date=cycle_date,timezone_name=timezone_name,
         window_start=window_start,window_end=window_end,max_requests=max_requests,max_seconds=max_seconds)
     if not resume and not aware(config['window_start']) <= utcnow() < aware(config['window_end']):
@@ -384,9 +388,13 @@ def collect_cycle(queries, *, destination, cycle_date, timezone_name, window_sta
                 raise ValueError('Resume requires identical date, window, plan and limits')
             if state['coverage_complete']:
                 return state  # Completed evidence needs no new requests, even after expiry.
+            if state.get('isolate_pagination') or state.get('isolated_query_failures'):
+                raise ValueError('Pagination-isolated cycle cannot resume; retain its incomplete coverage')
         else:
             state = dict(config,cycle_id=uuid4().hex,created_at=utcnow().isoformat(),attempts=[],
                 budget=dict(requests=0,stopped=False,pending_request=False,last_request_utc=None))
+            if isolate_pagination:
+                state['isolate_pagination'] = True
             write_json_atomic(path,state)
         if not aware(config['window_start']) <= utcnow() < aware(config['window_end']):
             raise ValueError('Current time is outside the requested daily observation window')
@@ -411,7 +419,8 @@ def collect_cycle(queries, *, destination, cycle_date, timezone_name, window_sta
         state['attempts'].append(attempt)
         write_json_atomic(path,state)
         collect_plan(queries,destination=directory/attempt,full_plan=True,budget=budget,
-                     resume_from=checkpoint,post=post)
+                     resume_from=checkpoint if resume else None,post=post,
+                     isolate_pagination=isolate_pagination)
         state, _, _ = cycle_evidence(path)
         return state
 
