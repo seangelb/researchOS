@@ -60,6 +60,10 @@ partitions, then test actual parent/child VIN unions and new categories in held-
 ZIPs. Preserve the frozen panel for comparable history. The present review neither
 authorizes that collection nor changes the 600-request daily cap or scheduled trial.
 
+The [September 18 facet proposal](facet_proposal_20260918.md) now specifies that
+separate experiment, including its 722-request budget and read-only CLI preview.
+It is not approved or scheduled.
+
 Notebook Run All is offline/read-only. The existing explicit Notebook 20 exporter
 includes these three tables and binds their sources, code and outputs. A new export
 is a new review vintage; old exports and source files are retained unchanged.
