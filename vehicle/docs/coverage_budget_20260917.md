@@ -51,6 +51,12 @@ does not establish complete child coverage or numerical parent/child parity.
 Do not count those 28 mismatches as missing categories or sum overlapping parent
 and child counts as inventory.
 
+The subsequent [offline partition ledger](partition_coverage.md) makes these
+relationships reproducible in Notebook 20. It reconciles the 30 retained parent
+facet responses but leaves 690 make/year parent counts unknown. It also shows
+positive panel count residuals in all 30 measured parent cells. These are
+September 8 source-time diagnostics, not current inventory or VIN-membership parity.
+
 The next coverage experiment should refresh source-supported facet counts before
 enumeration, retain each parent/child relationship and numerical residual, and
 separately display unknown/missing/out-of-range native categories. Reconcile native
