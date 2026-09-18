@@ -1,5 +1,9 @@
 # Proposed category-count experiment, September 18
 
+**Executed once and stopped on HTTP 403.** See the
+[September 18 outcome](facet_outcome_20260918.md): one failed request, 721
+unattempted, no category counts. The original attempt must not be restarted.
+
 **Approved by the user on September 17 with "approve all".** The
 [authorization record](../config/carvana_facets_approved_20260917.json) binds the
 unchanged proposal hash, reviewed implementation and exact one-time scope below.
