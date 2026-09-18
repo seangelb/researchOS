@@ -114,15 +114,16 @@ by this document or implied by the earlier daily-panel heartbeat.
 
 Notebook 20 now exposes per-query coverage, pass/ZIP intersections and unions,
 incremental VINs, held-out additions, price versus delivery-cost differences,
-anchor drift and capture time spans. Its geography settings select the inactive
-proposal and read retained evidence only. Comparisons require complete queries,
+anchor drift and capture time spans. Its geography settings select the executed
+September 13 manifest and read retained evidence only. Comparisons require complete queries,
 source/SQLite parity and captures within the proposed window; missing queries
 remain unknown. Exported tables include context observations and source paths.
-Review these tables before authorizing the pilot.
+Review these tables alongside the [measured coverage budget](coverage_budget_20260917.md).
 The geography reader/comparison checkpoint passed the 1,096-test vehicle suite,
 then all 13 final focused geography tests, including source corruption, SQLite
 differences, offline guards, cutoffs, repeat comparisons and held-out separation.
-All nine vehicle notebooks passed offline. No live requests were made.
+All nine vehicle notebooks passed offline at that implementation checkpoint.
+The subsequently authorized pilot result is recorded above.
 An incomplete query cannot support absence or geographic exclusion. Identical
 counts alone cannot establish identical membership or an atomic snapshot.
 
@@ -131,5 +132,7 @@ full-coverage budget. The current 600-request daily cap is not enlarged. Retain 
 context observations while deduplicating analytical inventory counts. Separate
 old inventory first discovered in a new context from genuinely newly observed
 listing episodes. Keep evidence vintages, observation-age lower bounds and missing
-dates visible. The full goal still requires measured geographic results, a baseline
-and a separately declared operating trial; this change does not establish them.
+dates visible. The pilot supplies bounded geographic evidence; the full goal still
+requires broader category validation, a full-coverage baseline and successful
+operating validation. The current fixed-panel trial's failures and missing dates
+remain in its denominator.
