@@ -3,7 +3,7 @@ import pandas as pd
 
 from vehicle_tracker.checks import (CHECK_COLUMNS, IDENTITY, _text_rows,
     validate_checks, validate_check_identities)
-from vehicle_tracker.events import _aware, vin_events
+from vehicle_tracker.events import CYCLE_COLUMNS, _aware, vin_events
 
 TIMELINE_COLUMNS = ['retailer', 'vin', 'evidence_type', 'observed_at', 'available_at',
     'assessed_at', 'cycle_date', 'window_start', 'window_end', 'cycle_id', 'listing_id',
@@ -12,6 +12,106 @@ TIMELINE_COLUMNS = ['retailer', 'vin', 'evidence_type', 'observed_at', 'availabl
     'timing_uncertain', 'coverage_complete', 'coverage_reason', 'absence_streak',
     'reappeared_after_absence', 'source', 'capture_id', 'check_id', 'correction_versions',
     'reviewer', 'note']
+
+HISTORY_COLUMNS = ['retailer', 'vin', 'first_observed_at', 'last_observed_at',
+    'first_observed_date', 'first_available_at', 'available_at', 'observed_span_days',
+    'retained_captures', 'observed_cycles', 'observed_scopes', 'listing_ids',
+    'first_cycle_ids', 'first_scope_ids', 'first_capture_ids',
+    'first_evidence_includes_partial', 'known_only_from_partial_cycles',
+    'present_in_earliest_selected_cycle', 'earlier_listing_history_unknown', 'as_of']
+COHORT_COLUMNS = ['retailer', 'first_observed_date', 'observed_vins',
+    'first_evidence_includes_partial', 'known_only_from_partial_cycles',
+    'present_in_earliest_selected_cycle', 'as_of']
+
+
+def observed_history(days, rows, *, as_of):
+    """First sightings within selected evidence, including valid partial-cycle rows.
+
+    Return one history row per retailer/VIN, first-local-date cohort counts, and
+    every original observation membership joined to its cycle context. Different
+    scopes and relistings do not reset first sighting when earlier evidence is
+    selected. No price/status is chosen across contexts, and no absence or new
+    listing is inferred. Elapsed first-to-last sighting is not continuous time on
+    market or the age of the current listing episode. Caller replays source bytes
+    before passing rows; this function performs no I/O and changes no inputs.
+    """
+    cutoff = _aware(as_of)
+    empty = (pd.DataFrame(columns=HISTORY_COLUMNS), pd.DataFrame(columns=COHORT_COLUMNS),
+             pd.DataFrame(columns=list(dict.fromkeys([*rows.columns, *CYCLE_COLUMNS]))))
+    if days.empty:
+        if not rows.empty:
+            raise ValueError('Observation history requires matching cycle evidence')
+        return empty
+    if set(CYCLE_COLUMNS) - set(days.columns):
+        raise ValueError('Observation history requires cycle context and clocks')
+    schedule = days[CYCLE_COLUMNS].copy()
+    required = ['cycle_id', 'retailer', 'vin', 'listing_id', 'capture_id', 'observed_at_utc']
+    if set(required) - set(rows.columns):
+        raise ValueError('Observation history requires identity and source columns')
+    if (schedule.cycle_id.isna().any() or schedule.cycle_id.duplicated().any()
+            or not rows.cycle_id.isin(schedule.cycle_id).all()):
+        raise ValueError('Missing, duplicate or unknown observation-cycle identities')
+    schedule['available_at'] = schedule.available_at.map(_aware)
+    schedule = schedule.loc[schedule.available_at.le(cutoff)].copy()
+    selected = rows.loc[rows.cycle_id.isin(schedule.cycle_id)].copy()
+    if schedule.empty:
+        return empty
+    keys = ['cycle_id', 'cycle_date', 'scope_id', 'timezone']
+    if (schedule[keys].isna().any().any()
+            or schedule[keys].astype(str).apply(lambda s: s.str.strip().eq('')).any().any()
+            or schedule.timezone.nunique() != 1
+            or not schedule.coverage_complete.map(lambda value: type(value) is bool).all()):
+        raise ValueError('Require explicit cycle identities, coverage and one timezone')
+    dates = pd.to_datetime(schedule.cycle_date, format='%Y-%m-%d', errors='raise')
+    if not dates.dt.strftime('%Y-%m-%d').eq(schedule.cycle_date).all():
+        raise ValueError('Cycle dates must be ISO dates')
+    for column in ['window_start', 'window_end']:
+        schedule[column] = schedule[column].map(_aware)
+    if (schedule.window_start.gt(schedule.window_end).any()
+            or schedule.window_end.gt(schedule.available_at).any()):
+        raise ValueError('Cycle observation and availability clocks are inconsistent')
+    if (selected[required].isna().any().any()
+            or selected[required].astype(str).apply(lambda s: s.str.strip().eq('')).any().any()
+            or selected.duplicated(['cycle_id', 'capture_id', 'retailer', 'listing_id']).any()
+            or selected.groupby(['retailer', 'listing_id']).vin.nunique().gt(1).any()):
+        raise ValueError('Missing, repeated or conflicting retained observation identities')
+    selected['observed_at_utc'] = pd.to_datetime(selected.observed_at_utc.map(_aware), utc=True)
+    memberships = selected.merge(schedule, on='cycle_id', how='left', validate='many_to_one')
+    if not memberships.observed_at_utc.between(memberships.window_start, memberships.window_end).all():
+        raise ValueError('Observation falls outside its retained cycle window')
+    if memberships.empty:
+        return empty[0], empty[1], memberships
+    # Multiple retained contexts may have different prices. Keep all memberships;
+    # neither deduplication nor a last-row rule selects a representative quote.
+    memberships = memberships.sort_values(
+        ['observed_at_utc', 'retailer', 'vin', 'cycle_id', 'capture_id'], kind='stable').reset_index(drop=True)
+    earliest = set(schedule.loc[schedule.window_start.eq(schedule.window_start.min()), 'cycle_id'])
+    zone = schedule.timezone.iloc[0]
+    summaries = []
+    for (retailer, vin), group in memberships.groupby(['retailer', 'vin'], sort=True):
+        first, last = group.observed_at_utc.min(), group.observed_at_utc.max()
+        initial = group.loc[group.observed_at_utc.eq(first)]
+        joined = lambda name: ';'.join(sorted(set(initial[name].astype(str))))
+        summaries.append(dict(retailer=retailer, vin=vin, first_observed_at=first,
+            last_observed_at=last, first_observed_date=first.tz_convert(zone).date().isoformat(),
+            first_available_at=initial.available_at.min(), available_at=group.available_at.max(),
+            observed_span_days=(last-first).total_seconds()/86400,
+            retained_captures=group.capture_id.nunique(), observed_cycles=group.cycle_id.nunique(),
+            observed_scopes=group.scope_id.nunique(), listing_ids=';'.join(sorted(set(group.listing_id.astype(str)))),
+            first_cycle_ids=joined('cycle_id'), first_scope_ids=joined('scope_id'),
+            first_capture_ids=joined('capture_id'),
+            first_evidence_includes_partial=bool((~initial.coverage_complete).any()),
+            known_only_from_partial_cycles=bool((~group.coverage_complete).all()),
+            present_in_earliest_selected_cycle=bool(group.cycle_id.isin(earliest).any()),
+            earlier_listing_history_unknown=True, as_of=cutoff))
+    history = pd.DataFrame(summaries, columns=HISTORY_COLUMNS)
+    cohorts = history.groupby(['retailer', 'first_observed_date'], as_index=False).agg(
+        observed_vins=('vin', 'size'),
+        first_evidence_includes_partial=('first_evidence_includes_partial', 'sum'),
+        known_only_from_partial_cycles=('known_only_from_partial_cycles', 'sum'),
+        present_in_earliest_selected_cycle=('present_in_earliest_selected_cycle', 'sum'))
+    cohorts['as_of'] = cutoff
+    return history, cohorts[COHORT_COLUMNS], memberships
 
 
 def vin_timeline(days, rows, checks=None, *, retailer, vin, as_of):

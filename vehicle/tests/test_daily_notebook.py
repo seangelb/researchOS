@@ -14,6 +14,7 @@ spec = importlib.util.spec_from_file_location('daily_notebook_guards', ROOT / 's
 checker = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(checker)
 CELL_IDS = ['daily-analyst-settings', 'daily-operating-view', 'daily-cycle-data', 'daily-operating-tables',
+            'observed-history-ledger',
             'daily-vin-analysis', 'daily-comparison-eligibility', 'daily-vin-join',
             'daily-asking-prices', 'daily-price-composition', 'daily-price-bridge',
             'daily-observed-age-prices', 'daily-observed-age-clock', 'daily-observed-age-summary', 'sale-review-data',
@@ -103,6 +104,20 @@ def test_daily_incomplete_cycle_exposes_unknown_absence(monkeypatch, tmp_path, t
     assert 'BLOCKED DAILY JOIN' in capsys.readouterr().out
     assert not scope['daily_comparison_allowed']
     assert scope['asking_price_means'].empty and scope['price_change_counts'].empty
+
+
+def test_observation_history_remains_visible_without_comparable_scope(monkeypatch, tmp_path, two_cycle_rows):
+    days, rows = two_cycle_rows
+    days.loc[0, 'coverage_complete'] = False
+    days.loc[1, 'scope_id'] = 'expanded-scope'
+    scope = execute_daily(monkeypatch, tmp_path, days, rows)
+    assert scope['daily_analysis_error'] and not scope['daily_comparison_allowed']
+    assert scope['observed_history_error'] is None
+    history = scope['observed_vin_history'].iloc[0]
+    assert history.observed_scopes == 2 and history.observed_span_days == 1
+    assert history.first_evidence_includes_partial
+    assert len(scope['observed_history_memberships']) == 2
+    assert scope['first_observed_cohorts'].observed_vins.tolist() == [1]
 
 
 def test_daily_synthetic_example_relisting_gap_and_missing_are_separate(monkeypatch, tmp_path):

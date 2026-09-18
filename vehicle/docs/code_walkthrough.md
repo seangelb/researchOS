@@ -95,6 +95,17 @@ tables in the explicitly imported history; the last three are pandas results.
 | `daily_events` | One tracked `(retailer, vin)` per selected `cycle_id`, including absence rows after first observation. | `observed_in_cycle`, `event_type`, prior identity, absence streak and timing uncertainty. An absence row carries last-seen evidence; it is not a new source observation. |
 | `daily_identity_join` | One `(retailer, vin)` across the selected before/after pair; an outer join. | `_merge`, before/after listing IDs, prices and source references. `both` is matched; `left_only` disappeared; `right_only` was added. |
 
+Notebook 20 also exposes `observed_vin_history` (one retailer/VIN),
+`first_observed_cohorts` (one retailer/first-observed local date), and
+`observed_history_memberships` (every selected source observation with its cycle
+context). These presence-only tables include valid rows from partial collections.
+They do not infer absences, continuous days on market or new listings. A known VIN
+keeps its earlier first sighting across relistings or scope changes when that
+earlier evidence is selected. Different context prices remain in the membership
+rows; the summary selects no representative price. A narrower evidence selection
+may have a later first sighting. The separate matched-price age analysis below
+continues to use its explicitly labelled complete-collection history.
+
 There are also different clocks. `observed_at_utc` is the source observation time.
 `evidence_available_at_utc` records when retained page evidence became available;
 the cycle's `available_at` follows its required evidence. `imported_at_utc` records
