@@ -1,6 +1,10 @@
 # Proposed category-count experiment, September 18
 
-**This proposal is not approved or scheduled.** It makes no change to the fixed
+**Approved by the user on September 17 with "approve all".** The
+[authorization record](../config/carvana_facets_approved_20260917.json) binds the
+unchanged proposal hash, reviewed implementation and exact one-time scope below.
+Execution remains limited to the original September 18 start window and fresh
+destination; approval is not evidence that collection occurred. It makes no change to the fixed
 101-query daily trial, its 600-request limit, or the frozen 32-VIN status study.
 
 The [offline partition ledger](partition_coverage.md) found only 30 retained

@@ -62,7 +62,9 @@ authorizes that collection nor changes the 600-request daily cap or scheduled tr
 
 The [September 18 facet proposal](facet_proposal_20260918.md) now specifies that
 separate experiment, including its 722-request budget and read-only CLI preview.
-It is not approved or scheduled.
+The user approved its exact scope on September 17; the linked authorization record
+preserves the original plan hash. Approval does not establish execution or broader
+inventory coverage.
 
 Notebook Run All is offline/read-only. The existing explicit Notebook 20 exporter
 includes these three tables and binds their sources, code and outputs. A new export
