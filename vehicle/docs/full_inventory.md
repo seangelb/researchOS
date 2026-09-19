@@ -36,6 +36,9 @@ All-year make/model queries avoid the old fixed year boundary. Very large or
 changing categories can still have unstable pagination; incomplete categories
 remain unknown. Count agreement across hours does not prove identical membership.
 The sequential sweep's actual observation interval must accompany every result.
+The [September 19 pagination review](full_inventory_partition_review_20260919.md)
+records the first observed overlap and an offline year-partition proposal. That
+proposal is separate from the frozen collector and still needs live validation.
 
 ## Speed changes
 
