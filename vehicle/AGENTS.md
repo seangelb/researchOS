@@ -10,6 +10,11 @@
   received HTTP 200 after the user disconnected their VPN. Its single-request
   allowance is consumed. Preserve this result without treating it as a replacement
   daily cycle or automatic clearance of the existing live-collection stop.
+- The user's subsequent direct instruction authorized a separate
+  [full capture and sales review](docs/full_capture_sales_20260919.md). It completed
+  all 101 queries, 468 requests and 10,085 VINs without access failures. Its allowance
+  is consumed; keep the original failed daily attempt and seven-date denominator.
+  Further live work requires its own applicable authorization and preflight.
 - Start with Carvana; add other retailers only for a concrete research question and verified source.
 - Preserve retailer names, listing IDs, native statuses, source references, and observation timestamps.
 - VIN/vehicle identity does not merge listing histories across retailers. Include retailer in observation keys.
