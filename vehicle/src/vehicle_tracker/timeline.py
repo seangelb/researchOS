@@ -14,14 +14,15 @@ TIMELINE_COLUMNS = ['retailer', 'vin', 'evidence_type', 'observed_at', 'availabl
     'reviewer', 'note']
 
 HISTORY_COLUMNS = ['retailer', 'vin', 'first_observed_at', 'last_observed_at',
-    'first_observed_date', 'first_available_at', 'available_at', 'observed_span_days',
+    'first_observed_date', 'first_available_at', 'first_known_at', 'available_at', 'observed_span_days',
     'retained_captures', 'observed_cycles', 'observed_scopes', 'listing_ids',
     'first_cycle_ids', 'first_scope_ids', 'first_capture_ids',
     'first_evidence_includes_partial', 'known_only_from_partial_cycles',
     'present_in_earliest_selected_cycle', 'earlier_listing_history_unknown', 'as_of']
 COHORT_COLUMNS = ['retailer', 'first_observed_date', 'observed_vins',
     'first_evidence_includes_partial', 'known_only_from_partial_cycles',
-    'present_in_earliest_selected_cycle', 'as_of']
+    'known_only_from_partial_cycles_known_vins', 'present_in_earliest_selected_cycle',
+    'present_in_earliest_selected_cycle_known_vins', 'as_of']
 
 
 def observed_history(days, rows, *, as_of):
@@ -81,35 +82,91 @@ def observed_history(days, rows, *, as_of):
         raise ValueError('Observation falls outside its retained cycle window')
     if memberships.empty:
         return empty[0], empty[1], memberships
-    # Multiple retained contexts may have different prices. Keep all memberships;
-    # neither deduplication nor a last-row rule selects a representative quote.
-    memberships = memberships.sort_values(
-        ['observed_at_utc', 'retailer', 'vin', 'cycle_id', 'capture_id'], kind='stable').reset_index(drop=True)
     earliest = set(schedule.loc[schedule.window_start.eq(schedule.window_start.min()), 'cycle_id'])
-    zone = schedule.timezone.iloc[0]
+    memberships['source_group_kind'] = 'cycle'
+    memberships['source_group_id'] = memberships.cycle_id
+    memberships['analysis_available_at'] = memberships.available_at
+    return summarize_observed_memberships(memberships, as_of=as_of, earliest_cycle_ids=earliest)
+
+
+def summarize_observed_memberships(memberships, *, as_of, earliest_cycle_ids=()):
+    """Pure positive history for validated cycle, query-report and DOM memberships.
+
+    Non-cycle sources keep null cycle identities. ``first_available_at`` is the
+    availability of the earliest observed capture; ``first_known_at`` is when any
+    selected observation of the VIN first became eligible. Late historical
+    publications can change the first metric without backdating the second.
+    Unknown analysis availability is withheld, never replaced by an observation
+    clock. This function chooses no representative price and infers no absence.
+    """
+    cutoff = _aware(as_of)
+    memberships = memberships.copy(deep=True)
+    empty = (pd.DataFrame(columns=HISTORY_COLUMNS), pd.DataFrame(columns=COHORT_COLUMNS), memberships.iloc[:0])
+    if memberships.empty:
+        return empty
+    required = ['retailer', 'vin', 'listing_id', 'capture_id', 'observed_at_utc',
+                'source_group_kind', 'source_group_id', 'cycle_id', 'scope_id',
+                'timezone', 'coverage_complete', 'available_at', 'analysis_available_at']
+    if set(required) - set(memberships.columns):
+        raise ValueError('Positive history requires explicit source memberships and analysis clocks')
+    for name in ['available_at', 'analysis_available_at']:
+        memberships[name] = pd.to_datetime(memberships[name].map(
+            lambda value: _aware(value) if pd.notna(value) else pd.NaT), utc=True)
+    if not (memberships.available_at.eq(memberships.analysis_available_at)
+            | (memberships.available_at.isna() & memberships.analysis_available_at.isna())).all():
+        raise ValueError('Membership availability differs from its analysis publication clock')
+    memberships = memberships.loc[memberships.available_at.notna() & memberships.available_at.le(cutoff)].copy()
+    if memberships.empty:
+        return empty[0], empty[1], memberships
+    identities = [name for name in required if name not in {'cycle_id', 'coverage_complete',
+                                                          'available_at', 'analysis_available_at'}]
+    if (memberships[identities].isna().any().any()
+            or memberships[identities].astype(str).apply(lambda s: s.str.strip().eq('')).any().any()
+            or memberships.timezone.nunique() != 1
+            or not memberships.coverage_complete.map(lambda value: type(value) is bool).all()
+            or memberships.duplicated(['source_group_kind', 'source_group_id', 'capture_id', 'retailer', 'listing_id']).any()
+            or memberships.groupby(['retailer', 'listing_id']).vin.nunique().gt(1).any()):
+        raise ValueError('Missing, repeated or conflicting positive observation memberships')
+    real_cycle = memberships.source_group_kind.eq('cycle')
+    if (memberships.loc[real_cycle, 'cycle_id'].isna().any()
+            or memberships.loc[~real_cycle, 'cycle_id'].notna().any()
+            or memberships.loc[~real_cycle, 'coverage_complete'].any()):
+        raise ValueError('Non-cycle evidence cannot claim cycle identity or complete cycle coverage')
+    memberships['observed_at_utc'] = pd.to_datetime(memberships.observed_at_utc.map(_aware), utc=True)
+    if memberships.observed_at_utc.gt(memberships.available_at).any():
+        raise ValueError('Observation cannot follow its analysis availability')
+    memberships = memberships.sort_values(
+        ['observed_at_utc', 'retailer', 'vin', 'source_group_kind', 'source_group_id', 'capture_id'],
+        kind='stable').reset_index(drop=True)
+    earliest = set(earliest_cycle_ids)
+    zone = memberships.timezone.iloc[0]
     summaries = []
     for (retailer, vin), group in memberships.groupby(['retailer', 'vin'], sort=True):
         first, last = group.observed_at_utc.min(), group.observed_at_utc.max()
         initial = group.loc[group.observed_at_utc.eq(first)]
-        joined = lambda name: ';'.join(sorted(set(initial[name].astype(str))))
+        cycles = group.loc[group.cycle_id.notna()]
+        joined = lambda name: ';'.join(sorted(set(initial[name].dropna().astype(str)))) or None
         summaries.append(dict(retailer=retailer, vin=vin, first_observed_at=first,
             last_observed_at=last, first_observed_date=first.tz_convert(zone).date().isoformat(),
-            first_available_at=initial.available_at.min(), available_at=group.available_at.max(),
+            first_available_at=initial.available_at.min(), first_known_at=group.available_at.min(),
+            available_at=group.available_at.max(),
             observed_span_days=(last-first).total_seconds()/86400,
             retained_captures=group.capture_id.nunique(), observed_cycles=group.cycle_id.nunique(),
             observed_scopes=group.scope_id.nunique(), listing_ids=';'.join(sorted(set(group.listing_id.astype(str)))),
             first_cycle_ids=joined('cycle_id'), first_scope_ids=joined('scope_id'),
             first_capture_ids=joined('capture_id'),
             first_evidence_includes_partial=bool((~initial.coverage_complete).any()),
-            known_only_from_partial_cycles=bool((~group.coverage_complete).all()),
-            present_in_earliest_selected_cycle=bool(group.cycle_id.isin(earliest).any()),
+            known_only_from_partial_cycles=bool((~cycles.coverage_complete).all()) if len(cycles) else None,
+            present_in_earliest_selected_cycle=bool(cycles.cycle_id.isin(earliest).any()) if len(cycles) and earliest else None,
             earlier_listing_history_unknown=True, as_of=cutoff))
     history = pd.DataFrame(summaries, columns=HISTORY_COLUMNS)
     cohorts = history.groupby(['retailer', 'first_observed_date'], as_index=False).agg(
         observed_vins=('vin', 'size'),
         first_evidence_includes_partial=('first_evidence_includes_partial', 'sum'),
-        known_only_from_partial_cycles=('known_only_from_partial_cycles', 'sum'),
-        present_in_earliest_selected_cycle=('present_in_earliest_selected_cycle', 'sum'))
+        known_only_from_partial_cycles=('known_only_from_partial_cycles', lambda values: values.sum(min_count=1)),
+        known_only_from_partial_cycles_known_vins=('known_only_from_partial_cycles', 'count'),
+        present_in_earliest_selected_cycle=('present_in_earliest_selected_cycle', lambda values: values.sum(min_count=1)),
+        present_in_earliest_selected_cycle_known_vins=('present_in_earliest_selected_cycle', 'count'))
     cohorts['as_of'] = cutoff
     return history, cohorts[COHORT_COLUMNS], memberships
 

@@ -134,12 +134,26 @@ whole-population reconciliation. First-seen history can use valid positive rows
 from partial captures. Missingness cannot.
 
 `vehicle_tracker.catalog_history.observed_catalog_history` reads explicitly
-selected catalog exports and legacy cycle/database pairs, verifies their retained
-evidence, and returns VIN history, first-observed cohorts and source memberships.
-It preserves distinct same-date attempts and differing query scopes. Catalog
-analysis becomes available at its export publication time; actual observations
-keep their original source clocks. This adapter produces no absence or sales
-classification. Notebook 25 exposes these inputs without collecting or writing.
+selected catalog exports, legacy cycle/database pairs and reviewed retained-history
+manifests. It verifies their retained evidence and returns VIN history,
+first-observed cohorts and source memberships. The additional manifests explicitly
+select older query reports and genuine samples, with source hashes and database
+comparisons where retained. Copies of the same capture count as one physical
+observation after their values and context agree; provenance aliases remain visible.
+Distinct captures and differing query scopes remain separate evidence.
+
+Older query reports and samples have no invented daily-cycle identity. They can
+establish an earlier sighting, but cannot establish complete daily coverage or
+absence. Unknown original evidence-availability clocks remain unknown; a reviewed
+publication supplies a conservative new analysis-availability clock. A legacy
+cycle with unknown source availability also needs that publication before its
+positive rows enter this combined history. Catalog analysis becomes available at
+its export publication time; actual observations keep their source clocks.
+`first_available_at` describes when the earliest observed evidence became eligible;
+`first_known_at` describes when any selected evidence first made the VIN known.
+Neither field establishes the vehicle's original listing date. This adapter
+produces no absence or sales classification. Notebook 25 exposes these inputs
+without collecting or writing.
 
 Review Notebook 25 for the expanded collector's saved reports, then Notebook 20
 for existing comparable-history analysis and Notebook 24 for native-status

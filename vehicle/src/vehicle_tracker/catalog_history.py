@@ -2,7 +2,8 @@
 
 Different scopes can establish earlier sightings, never cross-scope absences.
 Catalog availability is conservatively the saved export's publication clock.
-No input is imported, overwritten, scanned for, or silently deduplicated.
+No input is imported, overwritten or scanned for. Physical source aliases are
+deduplicated only after exact value/context checks, with every alias retained.
 """
 import hashlib
 import json
@@ -10,11 +11,11 @@ from pathlib import Path
 
 import pandas as pd
 
-from vehicle_tracker.cycles import read_cycle_history
+from vehicle_tracker.cycles import cycle_evidence, read_cycle_history
 from vehicle_tracker.events import CYCLE_COLUMNS, _aware
 from vehicle_tracker.history import OBSERVATION_COLUMNS, file_hash, read_history
 from vehicle_tracker.search import ENDPOINT
-from vehicle_tracker.timeline import observed_history
+from vehicle_tracker.timeline import observed_history, summarize_observed_memberships
 
 
 def _json(path):
@@ -155,7 +156,97 @@ def read_catalog_history(export_directory, *, as_of):
     return pd.DataFrame([day], columns=CYCLE_COLUMNS), rows
 
 
-def observed_catalog_history(*, catalog_exports=(), legacy_sources=(), as_of):
+def _legacy_provenance(rows, source, *, as_of):
+    """Retain source clocks omitted by the cycle row adapter, without inferring any."""
+    if rows.empty:
+        return rows
+    rows = rows.copy()
+    contexts, classes = {}, {}
+    for path in rows.source_path.unique():
+        capture = _json(path)
+        request = capture['request']
+        contexts[path] = json.dumps(dict(endpoint=capture['endpoint'], filters=request['filters'],
+            zip_code=request['zip5'], sort=request['sortBy'],
+            location_filter=request.get('requestedFeatures', []) == ['LocationBasedPrefiltering']), sort_keys=True)
+        classes[path] = ('search_response_' + capture['response_evidence']['kind']
+                         if capture.get('response_evidence') else 'retained_search_projection_only')
+    rows['context_json'] = rows.source_path.map(contexts)
+    rows['source_evidence_class'] = rows.source_path.map(classes)
+    if 'evidence_available_at_utc' not in rows:
+        available = {}
+        if source.get('database') is not None:
+            _, captures, _ = read_history(source['database'], run_ids=rows.run_id.unique())
+            available = {(r.run_id, r.capture_id): r.evidence_available_at_utc for r in captures.itertuples()}
+        else:
+            for path in source['cycle_paths']:
+                _, _, reports = cycle_evidence(path, as_of=as_of)
+                for report_path in reports:
+                    report = _json(report_path)
+                    for page in report['pages']:
+                        if page.get('source_sha256'):
+                            available[(report['run_id'], page['source_sha256'])] = page.get('evidence_available_at_utc')
+        rows['evidence_available_at_utc'] = [available.get((r.run_id, r.capture_id)) for r in rows.itertuples()]
+    rows['original_evidence_available_at'] = rows.evidence_available_at_utc
+    return rows
+
+
+def _physical_key(row):
+    return row['capture_id'], row['retailer'], row['listing_id']
+
+
+def _deduplicate_memberships(memberships):
+    """Database/report/cycle aliases witness one physical observation, not new ones."""
+    if memberships.empty:
+        return memberships
+    rows = memberships.copy()
+    value_columns = [name for name in OBSERVATION_COLUMNS if name not in {'run_id', 'capture_id'}]
+    for name in value_columns:
+        if name not in rows:
+            rows[name] = None
+    result = []
+    for _, group in rows.groupby(['capture_id', 'retailer', 'listing_id'], sort=False, dropna=False):
+        reference = group.iloc[0]
+        for _, candidate in group.iloc[1:].iterrows():
+            for name in [*value_columns, 'context_json']:
+                left, right = reference[name], candidate[name]
+                if pd.isna(left) and pd.isna(right):
+                    continue
+                if pd.isna(left) or pd.isna(right):
+                    raise ValueError('Physical capture aliases differ in values or context: '+name)
+                if name == 'observed_at_utc':
+                    left, right = _aware(left), _aware(right)
+                elif name == 'context_json':
+                    left, right = json.loads(left), json.loads(right)
+                if left != right:
+                    raise ValueError('Physical capture aliases differ in values or context: '+name)
+        real = group.loc[group.cycle_id.notna()]
+        if real.cycle_id.nunique() > 1:
+            raise ValueError('One physical capture has conflicting real cycle memberships')
+        chosen = (real if not real.empty else group).iloc[0].to_dict()
+        aliases = []
+        for _, alias in group.iterrows():
+            existing = alias.get('source_aliases_json')
+            if isinstance(existing, str):
+                aliases.extend(json.loads(existing))
+            record = {}
+            for name in ['source_group_kind', 'source_group_id', 'cycle_id', 'run_id',
+                         'source_path', 'query_report_path', 'query_report_sha256',
+                         'manifest_path', 'manifest_sha256', 'history_manifest_path',
+                         'history_manifest_sha256', 'original_evidence_available_at', 'analysis_available_at']:
+                value = alias.get(name)
+                record[name] = (None if pd.isna(value) else value.isoformat()
+                                if isinstance(value, pd.Timestamp) else value)
+            aliases.append(record)
+        chosen['source_aliases_json'] = json.dumps(
+            list({json.dumps(alias, sort_keys=True): alias for alias in aliases}.values()), sort_keys=True)
+        # A previously known cycle remains an earlier witness of this same fact;
+        # adding a later publication cannot manufacture another observation.
+        chosen['available_at'] = chosen['analysis_available_at'] = group.analysis_available_at.min()
+        result.append(chosen)
+    return pd.DataFrame(result)
+
+
+def observed_catalog_history(*, catalog_exports=(), legacy_sources=(), retained_manifests=(), as_of):
     """Return (VIN history, first-observed cohorts, source memberships) read-only.
 
     ``catalog_exports`` contains explicitly selected catalog analysis directories.
@@ -163,21 +254,25 @@ def observed_catalog_history(*, catalog_exports=(), legacy_sources=(), as_of):
     (None replays source-only). Distinct same-date attempts and different scopes
     remain distinct memberships. No absence, reappearance or sales estimate is
     inferred by this adapter; use separate complete comparable-scope gates.
+    ``retained_manifests`` explicitly selects {path, sha256} publications of older
+    query reports and genuine DOM samples. Unknown original cycle availability is
+    withheld unless such a publication supplies a conservative analysis clock.
     """
+    from vehicle_tracker.retained_history import read_retained_history
+    cutoff = _aware(as_of)
+    retained = [read_retained_history(item['path'], expected_sha256=item['sha256'], as_of=as_of)
+                for item in retained_manifests]
+    published = pd.concat(retained, ignore_index=True) if retained else pd.DataFrame()
+    publication_clocks = {}
+    for _, row in published.iterrows():
+        key = _physical_key(row)
+        publication_clocks[key] = min(publication_clocks.get(key, _aware(row.analysis_available_at)),
+                                      _aware(row.analysis_available_at))
     days, rows = [], []
     for source in legacy_sources:
         selected_days, selected_rows = read_cycle_history(
             source['cycle_paths'], source.get('database'), as_of=as_of)
-        if not selected_rows.empty:
-            # Retain native query contexts, including across partial scopes.
-            contexts = {}
-            for path in selected_rows.source_path.unique():
-                capture = _json(path)
-                request = capture['request']
-                contexts[path] = json.dumps(dict(endpoint=capture['endpoint'], filters=request['filters'],
-                    zip_code=request['zip5'], sort=request['sortBy'],
-                    location_filter=request.get('requestedFeatures', []) == ['LocationBasedPrefiltering']), sort_keys=True)
-            selected_rows = selected_rows.assign(context_json=selected_rows.source_path.map(contexts))
+        selected_rows = _legacy_provenance(selected_rows, source, as_of=as_of)
         days.append(selected_days)
         rows.append(selected_rows)
     for directory in catalog_exports:
@@ -186,4 +281,27 @@ def observed_catalog_history(*, catalog_exports=(), legacy_sources=(), as_of):
         rows.append(selected_rows)
     combined_days = pd.concat(days, ignore_index=True) if days else pd.DataFrame(columns=CYCLE_COLUMNS)
     combined_rows = pd.concat(rows, ignore_index=True) if rows else pd.DataFrame(columns=[*OBSERVATION_COLUMNS, 'cycle_id'])
-    return observed_history(combined_days, combined_rows, as_of=as_of)
+    _, _, memberships = observed_history(combined_days, combined_rows, as_of=as_of)
+    if not memberships.empty:
+        original = memberships.get('original_evidence_available_at',
+                                   pd.Series(None, index=memberships.index, dtype=object))
+        source_clock = memberships.get('evidence_available_at_utc',
+                                       pd.Series(None, index=memberships.index, dtype=object))
+        memberships['original_evidence_available_at'] = original.where(original.notna(), source_clock)
+        clocks = []
+        for _, row in memberships.iterrows():
+            original_clock = row.original_evidence_available_at
+            known = (_aware(original_clock) if pd.notna(original_clock)
+                     else publication_clocks.get(_physical_key(row)))
+            clocks.append(max(_aware(row.available_at), known) if known is not None else pd.NaT)
+        memberships['available_at'] = memberships['analysis_available_at'] = pd.to_datetime(clocks, utc=True)
+    combined = pd.concat([memberships, published], ignore_index=True) if not published.empty else memberships
+    if not combined.empty:
+        combined['analysis_available_at'] = pd.to_datetime(combined.analysis_available_at, utc=True, format='ISO8601')
+        combined['available_at'] = combined.analysis_available_at
+        combined = combined.loc[combined.analysis_available_at.notna() & combined.analysis_available_at.le(cutoff)].copy()
+        combined = _deduplicate_memberships(combined)
+    eligible_days = combined_days.loc[combined_days.available_at.map(_aware).le(cutoff)] if not combined_days.empty else combined_days
+    earliest = (set(eligible_days.loc[eligible_days.window_start.map(_aware).eq(
+        eligible_days.window_start.map(_aware).min()), 'cycle_id']) if not eligible_days.empty else set())
+    return summarize_observed_memberships(combined, as_of=as_of, earliest_cycle_ids=earliest)
