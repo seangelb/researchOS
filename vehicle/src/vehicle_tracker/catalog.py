@@ -4,9 +4,11 @@ Discover all current makes, then non-overlapping model families where the native
 counts support them. Never constrain the population to a fixed year range. Small
 make probes are already complete queries and are reused without another request.
 """
+from contextlib import ExitStack
 from datetime import datetime, timedelta, timezone
 import hashlib
 import json
+import os
 from pathlib import Path
 import re
 from uuid import uuid4
@@ -20,6 +22,7 @@ from vehicle_tracker.history import OBSERVATION_COLUMNS, import_reports, read_qu
 from vehicle_tracker.search import ENDPOINT, collect_search, search_transport
 from vehicle_tracker.search_plan import verify_isolated_pagination
 from vehicle_tracker.storage import read_snapshots, write_json_atomic
+from vehicle_tracker.catalog_partitions import plan_year_partitions, year_make_candidates
 
 MAKE_RECONCILIATION_COLUMNS = ('''make discovery_query_id discovery_observed_at_utc
     discovery_native_count native_model_count_sum native_model_count_residual
@@ -27,6 +30,19 @@ MAKE_RECONCILIATION_COLUMNS = ('''make discovery_query_id discovery_observed_at_
     leaf_reported_total_sum observed_rows observed_unique_vins duplicate_memberships
     discovery_minus_leaf_native_count discovery_minus_observed_vins leaf_native_minus_observed_vins
     inventory_observation_start inventory_observation_end observed_count_scope''').split()
+YEAR_RECONCILIATION_COLUMNS = ('''query_id kind year_min year_max status context_validated
+    observed_at_utc reported_total positive_make_candidates native_zero_categories
+    declared_make_queries validated_make_queries declared_leaf_queries completed_leaf_queries
+    observed_rows observed_unique_vins native_minus_observed_vins''').split()
+
+
+def _strategy(config):
+    strategy = config.get('partition_strategy', 'all_year_models')
+    if ((config['format'], strategy) not in {
+            ('carvana-full-inventory-v1', 'all_year_models'),
+            ('carvana-full-inventory-v2', 'year_then_make_model')}):
+        raise ValueError('Require v1/all_year_models or v2/year_then_make_model configuration')
+    return strategy
 
 
 def utcnow():
@@ -41,11 +57,63 @@ def query(name, zip_code, filters):
     return dict(query_id=name, zip_code=zip_code, filters=filters, location_filter=False)
 
 
+def _unique_roots(paths):
+    """Use the same normalized path identity for deduplication and lock ordering."""
+    roots = {}
+    for path in paths:
+        resolved = Path(path).resolve()
+        roots.setdefault(os.path.normcase(str(resolved)), resolved)
+    return [roots[key] for key in sorted(roots)]
+
+
+def _capture_roots(config):
+    return _unique_roots([config['capture_root'], *config.get('related_capture_roots', [])])
+
+
+def _capture_root_state(root):
+    """Read prior evidence without opening a lock or creating any directories."""
+    unresolved = []
+    if root.exists() and not root.is_dir():
+        unresolved.append(dict(capture_directory=str(root), reason='Capture root is not a directory'))
+    else:
+        # These are dedicated capture roots: an empty/config-only date can be
+        # a crash before its durable budget existed, so it remains unresolved.
+        prior = [path for path in root.glob('*') if path.is_dir()]
+        for folder in sorted(prior):
+            try:
+                budget = json.loads((folder/'catalog_budget.json').read_text(encoding='utf-8'))['budget']
+                report = json.loads((folder/'catalog_report.json').read_text(encoding='utf-8'))
+                if any(type(budget[key]) is not bool for key in ['pending_request', 'stopped']):
+                    raise ValueError('Invalid pending/stopped request state')
+                if budget['pending_request']:
+                    reason = 'Pending request outcome remains uncertain'
+                elif budget['stopped']:
+                    reason = 'Durable catalog budget remains stopped'
+                elif report.get('status') not in {'collection_finished', 'stopped'}:
+                    reason = 'Catalog report is running or lacks terminal status'
+                else:
+                    aware(report['ended_at'])
+                    continue
+            except (OSError, ValueError, KeyError, TypeError, AttributeError):
+                reason = 'Missing or invalid catalog budget/report; inspect original evidence'
+            unresolved.append(dict(capture_directory=str(folder), reason=reason))
+    stopped = (root/'access_stop.json').exists()
+    return dict(capture_root=str(root), access_stopped=stopped,
+                unresolved_invocations=unresolved, blocked=stopped or bool(unresolved))
+
+
+def _require_clear_roots(states):
+    if any(state['access_stopped'] for state in states):
+        raise ValueError('Unresolved access stop in a related capture root; inspect original evidence')
+    if any(state['unresolved_invocations'] for state in states):
+        raise ValueError('Unresolved prior catalog invocation in a related capture root; inspect original evidence')
+
+
 def settings(path):
     path = Path(path).resolve()
     config = json.loads(path.read_text(encoding='utf-8'))
-    if (config['format'] != 'carvana-full-inventory-v1'
-            or config['endpoint'] != ENDPOINT or config['location_filter'] is not False
+    _strategy(config)
+    if (config['endpoint'] != ENDPOINT or config['location_filter'] is not False
             or config['page_size'] != 24 or config['sort'] != 'MostPopular'
             or config['minimum_spacing_seconds'] != 3
             or type(config['max_requests']) is not int or not 1 <= config['max_requests'] <= 6000
@@ -60,6 +128,13 @@ def settings(path):
             raise ValueError('Invalid bounded geographic validation setting')
     ZoneInfo(config['timezone'])
     config['capture_root'] = str((path.parent.parent/config['capture_root']).resolve())
+    peers = config.get('related_capture_roots')
+    if 'related_capture_roots' in config or _strategy(config) == 'year_then_make_model':
+        if (not isinstance(peers, list) or not peers
+                or any(not isinstance(peer, str) or not peer.strip() for peer in peers)):
+            raise ValueError('Require an explicit nonempty related_capture_roots path list')
+        config['related_capture_roots'] = [str(root) for root in
+            _unique_roots(path.parent.parent/peer for peer in peers)]
     return config
 
 
@@ -72,11 +147,16 @@ def preview(path, *, now=None):
     end = min(now+timedelta(seconds=config['max_seconds']), midnight-timedelta(microseconds=1))
     day = local.date().isoformat()
     root = Path(config['capture_root'])
+    states = [_capture_root_state(peer) for peer in _capture_roots(config)]
     return dict(config=config, config_sha256=digest(path), cycle_date=day,
         window_start=now.isoformat(), window_end=end.isoformat(), destination=str(root/day),
-        destination_fresh=not (root/day).exists(), access_stopped=(root/'access_stop.json').exists(),
+        destination_fresh=not (root/day).exists(), access_stopped=any(s['access_stopped'] for s in states),
+        capture_root_states=states, capture_preflight_blocked=any(s['blocked'] for s in states),
+        active_locks_checked=False,
         request_ceiling=config['max_requests'], effective_seconds=(end-now).total_seconds(),
-        discovery='Fresh broad make counts, then current make/model partitions; all years',
+        discovery=('Fresh broad counts, integer-year cells and both tails, then make/model partitions'
+                   if _strategy(config) == 'year_then_make_model' else
+                   'Fresh broad make counts, then current make/model partitions; all years'),
         national_coverage_verified=False, writes=False, requests=0)
 
 
@@ -95,11 +175,17 @@ def native_makes(capture):
     return sorted(buckets)
 
 
-def _validate_discovery(capture):
-    """All-year discovery must preserve valid native categories, including zeros."""
+def _validate_discovery(capture, *, year_bounds=None):
+    """Require exact requested year application and valid native categories."""
     year = capture['facet_data']['year']
-    if any(year.get(key) is not None for key in ('appliedMin', 'appliedMax')):
-        raise ValueError('Unexpected applied year boundary in all-year discovery')
+    expected = year_bounds or {}
+    if capture['request']['filters'].get('year', {}) != expected:
+        raise ValueError('Discovery year request differs from the selected bounds')
+    for bound, applied in [('min', 'appliedMin'), ('max', 'appliedMax')]:
+        value = year.get(applied)
+        if ((bound in expected and (type(value) is not int or value != expected[bound]))
+                or (bound not in expected and value is not None)):
+            raise ValueError('Unexpected applied year boundary in discovery')
     for bucket in capture['facet_data']['makes'].values():
         for value in [bucket['count'], *(child['count'] for child in bucket['parentModels'])]:
             if type(value) is not int or value < 0:
@@ -111,14 +197,19 @@ def _validate_discovery(capture):
                 raise ValueError('Invalid native discovery model ID')
 
 
-def model_partitions(capture, make, zip_code, prefix):
+def model_partitions(capture, make, zip_code, prefix, *, year_bounds=None):
     """Split only when native model counts and IDs form a partition; else whole make.
 
     An all-year whole-make fallback preserves unknown models and year boundaries.
     Its pagination may fail; that failure stays visible, never repaired by deduping.
     """
-    _validate_discovery(capture)
-    whole = [query(prefix+'_all', zip_code, {'makes': [{'name': make}]})]
+    _validate_discovery(capture, year_bounds=year_bounds)
+    filters = {'makes': [{'name': make}]}
+    if year_bounds is not None:
+        filters['year'] = dict(year_bounds)
+    if capture['request']['filters'] != filters:
+        raise ValueError('Requested make/year discovery differs from selected scope')
+    whole = [query(prefix+'_all', zip_code, filters)]
     buckets = capture['facet_data']['makes']
     total = capture['pagination']['totalMatchedInventory']
     bucket = buckets.get(make)
@@ -140,7 +231,7 @@ def model_partitions(capture, make, zip_code, prefix):
     if not valid:
         return whole, 'model counts/IDs do not partition make; collect whole make'
     return [query(prefix+f'_model_{i:03d}', zip_code,
-        {'makes': [{'name': make, 'parentModels': [{'name': child['key']}]}]})
+        dict(filters, makes=[{'name': make, 'parentModels': [{'name': child['key']}]}]))
         for i, child in enumerate(sorted(children, key=lambda c: c['key']))], 'native model partition'
 
 
@@ -170,7 +261,8 @@ def _make_reconciliation(report, primary):
     for probe in report.get('planned_make_probes', []):
         make = probe['filters']['makes'][0]['name']
         discovery = entries.get(probe['query_id'], {})
-        leaves = [q for q in report['leaf_queries'] if q['filters']['makes'][0]['name'] == make]
+        leaves = [q for q in report['leaf_queries'] if q['filters']['makes'][0]['name'] == make
+                  and q['filters'].get('year') == probe['filters'].get('year')]
         leaf_entries = [entries.get(q['query_id'], {}) for q in leaves]
         frames = [primary[q['query_id']] for q in leaves
                   if q['query_id'] in primary and not primary[q['query_id']].empty]
@@ -181,7 +273,7 @@ def _make_reconciliation(report, primary):
                       if leaves and all(e.get('reported_total') is not None for e in leaf_entries) else None)
         distinct = int(rows.vin.nunique()) if not rows.empty else 0
         clocks = pd.to_datetime(rows.observed_at_utc, utc=True, format='ISO8601') if not rows.empty else None
-        records.append(dict(make=make, discovery_query_id=probe['query_id'],
+        record = dict(make=make, discovery_query_id=probe['query_id'],
             discovery_observed_at_utc=discovery.get('discovery_observed_at_utc'),
             discovery_native_count=native, native_model_count_sum=model_total,
             native_model_count_residual=native-model_total if native is not None and model_total is not None else None,
@@ -197,7 +289,11 @@ def _make_reconciliation(report, primary):
             inventory_observation_start=clocks.min().isoformat() if clocks is not None else None,
             inventory_observation_end=clocks.max().isoformat() if clocks is not None else None,
             observed_count_scope=('Retained positive observations only; incomplete/unattempted leaves '
-                                  'give lower bounds, not zero inventory or evidence of absence.')))
+                                  'give lower bounds, not zero inventory or evidence of absence.'))
+        if report.get('partition_strategy') == 'year_then_make_model':
+            record.update(year_min=probe['filters']['year'].get('min'),
+                          year_max=probe['filters']['year'].get('max'))
+        records.append(record)
     return records
 
 
@@ -211,6 +307,7 @@ def _discovery_probes(config):
 def _planned_coverage(report):
     """Every declared query remains in the denominator after an early stop."""
     planned = [(p['query'], p['role']) for p in report['planned_discovery_probes']]
+    planned.extend((q, 'year_discovery') for q in report.get('planned_year_probes', []))
     planned.extend((q, 'make_discovery') for q in report.get('planned_make_probes', []))
     planned.extend((q, 'primary_inventory') for q in report['leaf_queries'])
     planned.extend((check['query'], 'geographic_inventory')
@@ -218,25 +315,81 @@ def _planned_coverage(report):
     return planned
 
 
+def _candidate_queries(discovery):
+    return [query(row['query_id'], row['zip_code'], row['filters'])
+            for row in discovery['candidates']]
+
+
+def _validate_year_children(children, parent):
+    """Make/model subdivision cannot clip an exact year or either open tail."""
+    bounds = parent['filters']['year']
+    if any(child['filters'].get('year') != bounds for child in children):
+        raise ValueError('Year partition child clips or changes its mandatory year context')
+
+
+def _year_reconciliation(report, primary):
+    """Count evidence per frozen year context, including both unbounded tails."""
+    entries = {entry['query']['query_id']: entry for entry in report['entries']}
+    discoveries = {item['partition']['query_id']: item for item in report['year_discoveries']}
+    records = []
+    for part in (report.get('year_plan') or {}).get('partitions', []):
+        bounds, identity = part['filters']['year'], part['query_id']
+        entry, discovery = entries.get(identity, {}), discoveries.get(identity)
+        probes = [q for q in report.get('planned_make_probes', []) if q['filters']['year'] == bounds]
+        leaves = [q for q in report['leaf_queries'] if q['filters'].get('year') == bounds]
+        frames = [primary[q['query_id']] for q in leaves
+                  if q['query_id'] in primary and not primary[q['query_id']].empty]
+        rows = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+        total = discovery['reported_total'] if discovery is not None else None
+        unique = int(rows.vin.nunique()) if not rows.empty else 0
+        records.append(dict(query_id=identity, kind=part['kind'], year_min=bounds.get('min'),
+            year_max=bounds.get('max'), status=entry.get('status', 'unattempted'),
+            context_validated=discovery is not None,
+            observed_at_utc=discovery['source']['observed_at_utc'] if discovery else None,
+            reported_total=total, positive_make_candidates=len(discovery['candidates']) if discovery else None,
+            native_zero_categories=len(discovery['native_zero_categories']) if discovery else None,
+            declared_make_queries=len(probes),
+            validated_make_queries=sum('partition_reason' in entries.get(q['query_id'], {}) for q in probes),
+            declared_leaf_queries=len(leaves),
+            completed_leaf_queries=sum(bool(entries.get(q['query_id'], {}).get('query_complete')) for q in leaves),
+            observed_rows=len(rows), observed_unique_vins=unique,
+            native_minus_observed_vins=total-unique if total is not None else None))
+    return records
+
+
+def _year_diagnostics(report, primary):
+    records = _year_reconciliation(report, primary)
+    complete = bool(records and all(row['context_validated'] for row in records))
+    known = sum(row['reported_total'] for row in records if row['reported_total'] is not None)
+    total = known if complete else None
+    return dict(year_reconciliation=records, year_contexts_validated=complete,
+        year_native_count_partial_sum=known, year_native_count_sum=total,
+        opening_minus_year_native_count=report['opening_total']-total if total is not None else None,
+        year_tail_counts={kind: next((row['reported_total'] for row in records if row['kind'] == kind), None)
+                          for kind in ['lower_tail', 'upper_tail']},
+        missing_or_noninteger_year_count=None,
+        year_count_note='Counts have different observation clocks. Residuals may reflect drift or unallocated years; zero does not establish national or missing-year coverage.')
+
+
 def collect_catalog(config_path, *, expected_sha256, post=None):
     """One fresh local-date invocation, one shared durable budget, no retry/resume."""
     start = preview(config_path)
     if expected_sha256 != start['config_sha256']:
         raise ValueError('Full-inventory config changed after preview')
-    if not start['destination_fresh'] or start['access_stopped']:
+    if not start['destination_fresh']:
         raise ValueError('Existing date or unresolved access stop; no replacement attempt')
+    _require_clear_roots(start['capture_root_states'])
     config, folder = start['config'], Path(start['destination'])
     root = folder.parent
-    root.mkdir(parents=True, exist_ok=True)
-    with cycle_lock(root):
-        # Recheck inside the shared root lock, including races with another date.
-        if folder.exists() or (root/'access_stop.json').exists():
-            raise ValueError('Existing date or unresolved access stop')
-        for prior in root.glob('*/catalog_budget.json'):
-            prior_report = prior.parent/'catalog_report.json'
-            if (not prior_report.is_file() or json.loads(prior_report.read_text()).get('status') == 'running'
-                    or json.loads(prior.read_text())['budget']['pending_request']):
-                raise ValueError('Unresolved prior catalog invocation; inspect original evidence')
+    roots = _capture_roots(config)
+    with ExitStack() as locks:
+        for peer in roots:
+            peer.mkdir(parents=True, exist_ok=True)
+            locks.enter_context(cycle_lock(peer))
+        # Recheck under every root's existing OS lock, including old v1 collectors.
+        if folder.exists():
+            raise ValueError('Existing date; no replacement attempt')
+        _require_clear_roots([_capture_root_state(peer) for peer in roots])
         folder.mkdir()
         selected = Path(config_path).read_bytes()
         if hashlib.sha256(selected).hexdigest() != expected_sha256:
@@ -249,7 +402,10 @@ def collect_catalog(config_path, *, expected_sha256, post=None):
             max_requests=config['max_requests'], max_seconds=config['max_seconds'])
         write_json_atomic(budget_path, dict(state, cycle_id=uuid4().hex, created_at=utcnow().isoformat(),
             budget=dict(requests=0, stopped=False, pending_request=False, last_request_utc=None)))
-        report = dict(format='carvana-full-inventory-run-v1', started_at=utcnow().isoformat(),
+        strategy = _strategy(config)
+        report = dict(format='carvana-full-inventory-run-v2' if strategy == 'year_then_make_model' else
+                           'carvana-full-inventory-run-v1', started_at=utcnow().isoformat(),
+            partition_strategy=strategy,
             capture_directory=str(folder),
             config_sha256=expected_sha256, cycle_date=start['cycle_date'], status='running',
             planned_discovery_probes=_discovery_probes(config),
@@ -259,6 +415,9 @@ def collect_catalog(config_path, *, expected_sha256, post=None):
             window_start=start['window_start'], window_end=start['window_end'],
             code_hashes={str(p): digest(p) for p in sorted(Path(__file__).parent.glob('*.py'))})
         report_path = folder/'catalog_report.json'
+        if strategy == 'year_then_make_model':
+            report.update(year_plan=None, planned_year_probes=[], planned_make_probes=[],
+                          year_discoveries=[], native_zero_categories=[])
         budget = CycleBudget(budget_path)
         known, primary = {}, {}
 
@@ -299,6 +458,32 @@ def collect_catalog(config_path, *, expected_sha256, post=None):
                 budget.timeout_ms()  # Even the final response must arrive inside the window.
             return result, rows
 
+        def collect_make(q):
+            make = q['filters']['makes'][0]['name']
+            probe, rows = run(q, 'make_discovery', probe=True)
+            if not probe or budget.stopped:
+                return False
+            facets = _facets(probe)
+            children, reason = model_partitions(facets, make, q['zip_code'], q['query_id'],
+                                                year_bounds=q['filters'].get('year'))
+            models = facets['facet_data']['makes'].get(make, {}).get('parentModels', [])
+            report['entries'][-1].update(discovery_observed_at_utc=facets['captured_at_utc'],
+                native_model_count_sum=sum(child['count'] for child in models) if models else None)
+            if probe['query_complete']:
+                children, reason = [q], 'complete make probe reused'
+                primary[q['query_id']] = rows
+            if strategy == 'year_then_make_model':
+                _validate_year_children(children, q)
+            report['leaf_queries'].extend(children)
+            report['entries'][-1]['partition_reason'] = reason
+            save()
+            for child in children:
+                if child != q:
+                    run(child, 'primary_inventory')
+                if budget.stopped:
+                    break
+            return True
+
         save()
         with search_transport(post) as send:
             try:
@@ -308,39 +493,47 @@ def collect_catalog(config_path, *, expected_sha256, post=None):
                 report['makes'] = native_makes(_facets(opening))
                 report['opening_total'] = opening['reported_total']
                 report['inventory_payload_page_floor'] = (opening['reported_total']+23)//24
-                # Publish all make probes, so a failed discovery keeps its denominator.
-                report['planned_make_probes'] = [query(f'make_{i:03d}', config['primary_zip'],
-                    {'makes': [{'name': make}]}) for i, make in enumerate(report['makes'])]
-                save()
-                for make, q in zip(report['makes'], report['planned_make_probes']):
-                    probe, rows = run(q, 'make_discovery', probe=True)
-                    if not probe or budget.stopped:
-                        break
-                    # Validate facet application even when the first page is complete.
-                    facets = _facets(probe)
-                    children, reason = model_partitions(facets, make, q['zip_code'], q['query_id'])
-                    models = facets['facet_data']['makes'].get(make, {}).get('parentModels', [])
-                    report['entries'][-1].update(
-                        discovery_observed_at_utc=facets['captured_at_utc'],
-                        native_model_count_sum=sum(child['count'] for child in models) if models else None)
-                    if probe['query_complete']:
-                        # Reuse <=24 rows (including empty makes): zero extra requests.
-                        children, reason = [q], 'complete make probe reused'
-                        primary[q['query_id']] = rows
-                    report['leaf_queries'].extend(children)
-                    report['entries'][-1]['partition_reason'] = reason
+                if strategy == 'year_then_make_model':
+                    page = opening['pages'][0]
+                    report['year_plan'] = plan_year_partitions(page['facet_source'],
+                        expected_sha256=page['facet_sha256'], zip_code=config['primary_zip'])
+                    report['planned_year_probes'] = [query(p['query_id'], p['zip_code'], p['filters'])
+                                                     for p in report['year_plan']['partitions']]
+                    save()  # Freeze all integer-year contexts and both tails before any year request.
+                    for part, q in zip(report['year_plan']['partitions'], report['planned_year_probes']):
+                        result, _ = run(q, 'year_discovery', probe=True)
+                        if not result or budget.stopped:
+                            break
+                        _facets(result)  # Bind its source, clock and query to the charged response.
+                        page = result['pages'][0]
+                        discovery = year_make_candidates(page['facet_source'],
+                            expected_sha256=page['facet_sha256'], partition=part)
+                        report['year_discoveries'].append(discovery)
+                        report['entries'][-1]['year_context_validated'] = True
+                        candidates = _candidate_queries(discovery)
+                        _validate_year_children(candidates, q)
+                        report['planned_make_probes'].extend(candidates)
+                        report['native_zero_categories'].extend(dict(row, year_query_id=q['query_id'])
+                                                               for row in discovery['native_zero_categories'])
+                        save()  # Every positive candidate is declared before enumeration starts.
+                        for candidate in candidates:
+                            if not collect_make(candidate) or budget.stopped:
+                                break
+                        if budget.stopped or budget.requests >= budget.max_requests:
+                            break
+                    all_years = len(report['year_discoveries']) == len(report['planned_year_probes'])
+                else:
+                    report['planned_make_probes'] = [query(f'make_{i:03d}', config['primary_zip'],
+                        {'makes': [{'name': make}]}) for i, make in enumerate(report['makes'])]
                     save()
-                    for child in children:
-                        if child == q:
-                            continue
-                        result, rows = run(child, 'primary_inventory')
-                        if result:
-                            primary[child['query_id']] = rows
-                    if budget.stopped:
-                        break
-                attempted_makes = [e for e in report['entries'] if e['role'] == 'make_discovery'
-                                   and e.get('query_complete') is not None and e['status'] != 'blocked']
-                report['discovery_complete'] = len(attempted_makes) == len(report['makes'])
+                    for q in report['planned_make_probes']:
+                        if not collect_make(q) or budget.stopped:
+                            break
+                    all_years = True
+                validated_makes = [e for e in report['entries'] if e['role'] == 'make_discovery'
+                                   and 'partition_reason' in e]
+                report['discovery_complete'] = bool(all_years
+                    and len(validated_makes) == len(report['planned_make_probes']))
                 save()
                 # Geographic checks are diagnostic; never pooled into the primary denominator.
                 by_id = {e['query']['query_id']: e for e in report['entries']}
@@ -414,6 +607,8 @@ def collect_catalog(config_path, *, expected_sha256, post=None):
             finally:
                 try:
                     report['make_reconciliation'] = _make_reconciliation(report, primary)
+                    if strategy == 'year_then_make_model':
+                        report.update(_year_diagnostics(report, primary))
                 except Exception as error:
                     # A diagnostic failure must not leave a terminal process labelled running.
                     report.update(status='stopped', declared_collection_complete=False,
@@ -451,7 +646,14 @@ def export_catalog(folder, *, output):
         raise ValueError('Collection is not terminal')
     if digest(folder/'selected_config.json') != report['config_sha256']:
         raise ValueError('Selected catalog configuration changed')
-    if report['planned_discovery_probes'] != _discovery_probes(json.loads((folder/'selected_config.json').read_text())):
+    config = json.loads((folder/'selected_config.json').read_text())
+    strategy = _strategy(config)
+    expected_format = ('carvana-full-inventory-run-v2' if strategy == 'year_then_make_model' else
+                       'carvana-full-inventory-run-v1')
+    if (report['format'] != expected_format
+            or report.get('partition_strategy', 'all_year_models') != strategy):
+        raise ValueError('Catalog partition strategy differs from selected configuration')
+    if report['planned_discovery_probes'] != _discovery_probes(config):
         raise ValueError('Catalog broad probe plan differs from selected configuration')
     budget = json.loads((folder/'catalog_budget.json').read_text())['budget']
     if budget['requests'] != report['requests'] or budget['pending_request']:
@@ -464,6 +666,7 @@ def export_catalog(folder, *, output):
         raise ValueError('Duplicate catalog query IDs')
     leaves = {q['query_id'] for q in report['leaf_queries']}
     derived_leaves = []
+    derived_year_plan, derived_years, derived_make_probes, derived_zeros = None, [], [], []
     charged = 0
     starts = []
     observed = []
@@ -485,15 +688,53 @@ def export_catalog(folder, *, output):
             if entry['role'] == 'discovery' and child.get('reported_total') is not None:
                 if native_makes(_facets(child)) != report['makes']:
                     raise ValueError('Catalog make scope differs from native source')
+                if strategy == 'year_then_make_model':
+                    page = child['pages'][0]
+                    derived_year_plan = plan_year_partitions(page['facet_source'],
+                        expected_sha256=page['facet_sha256'], zip_code=config['primary_zip'])
+                else:
+                    derived_make_probes = [query(f'make_{i:03d}', config['primary_zip'],
+                        {'makes': [{'name': make}]}) for i, make in enumerate(report['makes'])]
+            if entry['role'] == 'year_discovery':
+                if strategy != 'year_then_make_model' or derived_year_plan is None:
+                    raise ValueError('Year discovery lacks its frozen native basis')
+                parts = [p for p in derived_year_plan['partitions'] if p['query_id'] == q['query_id']]
+                if len(parts) != 1 or q != query(parts[0]['query_id'], parts[0]['zip_code'], parts[0]['filters']):
+                    raise ValueError('Year discovery differs from the exact declared partition')
+                page = child['pages'][0]
+                if page.get('facet_source'):
+                    # A retained facet can precede a fatal schema/identity/storage stop.
+                    # Replay its bytes, but only collection-admitted discovery
+                    # may create downstream candidates or native-zero records.
+                    if entry.get('year_context_validated') is True:
+                        _facets(child)
+                        discovery = year_make_candidates(page['facet_source'],
+                            expected_sha256=page['facet_sha256'], partition=parts[0])
+                        derived_years.append(discovery)
+                        candidates = _candidate_queries(discovery)
+                        _validate_year_children(candidates, q)
+                        derived_make_probes.extend(candidates)
+                        derived_zeros.extend(dict(row, year_query_id=q['query_id'])
+                                             for row in discovery['native_zero_categories'])
+                elif entry.get('year_context_validated'):
+                    raise ValueError('Validated year context lacks retained facets')
             if entry['role'] == 'make_discovery' and 'partition_reason' in entry:
+                if q not in derived_make_probes:
+                    raise ValueError('Make discovery is outside the native candidate plan')
                 make = q['filters']['makes'][0]['name']
                 facets = _facets(child)
-                children, _ = model_partitions(facets, make, q['zip_code'], q['query_id'])
+                children, reason = model_partitions(facets, make, q['zip_code'], q['query_id'],
+                    year_bounds=q['filters'].get('year') if strategy == 'year_then_make_model' else None)
                 models = facets['facet_data']['makes'].get(make, {}).get('parentModels', [])
                 model_total = sum(model['count'] for model in models) if models else None
                 if (entry.get('native_model_count_sum') != model_total
                         or entry.get('discovery_observed_at_utc') != facets['captured_at_utc']):
                     raise ValueError('Catalog make discovery diagnostic changed')
+                expected_reason = 'complete make probe reused' if child['query_complete'] else reason
+                if entry['partition_reason'] != expected_reason:
+                    raise ValueError('Catalog model partition reason differs from retained discovery')
+                if strategy == 'year_then_make_model':
+                    _validate_year_children([q] if child['query_complete'] else children, q)
                 derived_leaves.extend([q] if child['query_complete'] else children)
             # Reconcile the actual collector database, not only a fresh source import.
             database = path.parent/'vehicle.sqlite'
@@ -544,6 +785,22 @@ def export_catalog(folder, *, output):
         raise ValueError('Catalog query requests differ from durable budget')
     if derived_leaves != report['leaf_queries']:
         raise ValueError('Catalog leaves differ from fresh native discovery')
+    if derived_make_probes != report.get('planned_make_probes', []):
+        raise ValueError('Catalog make candidate plan differs from native discovery')
+    if strategy == 'year_then_make_model':
+        expected_year_queries = [query(p['query_id'], p['zip_code'], p['filters'])
+                                for p in (derived_year_plan or {}).get('partitions', [])]
+        if (derived_year_plan != report['year_plan'] or expected_year_queries != report['planned_year_probes']
+                or derived_years != report['year_discoveries'] or derived_zeros != report['native_zero_categories']):
+            raise ValueError('Catalog year plan, candidates or zero categories differ from retained discovery')
+        diagnostics = _year_diagnostics(report, primary)
+        if any(report.get(key) != value for key, value in diagnostics.items()):
+            raise ValueError('Catalog year reconciliation differs from retained sources')
+    declared = {(q['query_id'], role): q for q, role in _planned_coverage(report)}
+    for entry in report['entries']:
+        q = entry['query']
+        if declared.get((q['query_id'], entry['role'])) != q:
+            raise ValueError('Catalog entry differs from its declared query and role')
     if any((b-a).total_seconds() < 3 for a,b in zip(starts,starts[1:])):
         raise ValueError('Catalog request spacing is below the declared minimum')
     if any(not aware(report['window_start']) <= stamp <= aware(report['window_end']) for stamp in starts+observed):
@@ -559,7 +816,13 @@ def export_catalog(folder, *, output):
     if reports:
         import_reports(reports, output/'history.sqlite')
     pd.DataFrame(ledger).to_csv(output/'coverage.csv', index=False)
-    pd.DataFrame(make_reconciliation, columns=MAKE_RECONCILIATION_COLUMNS).to_csv(output/'make_reconciliation.csv', index=False)
+    make_columns = MAKE_RECONCILIATION_COLUMNS
+    if strategy == 'year_then_make_model':
+        make_columns = [*MAKE_RECONCILIATION_COLUMNS, 'year_min', 'year_max']
+        pd.DataFrame(report['year_reconciliation'], columns=YEAR_RECONCILIATION_COLUMNS).to_csv(
+            output/'year_reconciliation.csv', index=False)
+        write_json_atomic(output/'native_zero_categories.json', report['native_zero_categories'])
+    pd.DataFrame(make_reconciliation, columns=make_columns).to_csv(output/'make_reconciliation.csv', index=False)
     inventory.to_csv(output/'observations.csv', index=False)
     pd.DataFrame(report.get('geographic_checks', [])).to_json(output/'geographic_checks.json', orient='records', indent=2)
     write_json_atomic(output/'summary.json', report)

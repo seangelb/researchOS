@@ -1,0 +1,28 @@
+{
+  "format": "carvana-full-inventory-v2",
+  "endpoint": "https://apik.carvana.io/merch/search/api/v2/search",
+  "intent": "Discover all-year inventory, validate exact-year and outside-tail contexts, then enumerate every positive make/model/year partition with explicit gaps; not a sales census.",
+  "authorization_basis": "User requested successful full public-website inventory runs and a 6000-request/six-hour ceiling per fresh attempt. This prospective strategy preserves earlier attempts separately and does not authorize retries after access failures.",
+  "timezone": "America/New_York",
+  "primary_zip": "08542",
+  "validation_zips": [
+    "98101",
+    "33130"
+  ],
+  "validation_queries_per_zip": 4,
+  "validation_max_native_count": 240,
+  "location_filter": false,
+  "page_size": 24,
+  "sort": "MostPopular",
+  "minimum_spacing_seconds": 3,
+  "max_requests": 6000,
+  "max_seconds": 21600,
+  "capture_root": "data/experiments/carvana_full_inventory_years",
+  "partition_strategy": "year_then_make_model",
+  "related_capture_roots": [
+    "data/experiments/carvana_full_inventory",
+    "C:/Users/Sean/VscProjects/researchOS/vehicle/data/experiments/carvana_full_inventory",
+    "C:/Users/Sean/VscProjects/researchOS/vehicle/data/experiments/carvana_full_inventory_years",
+    "C:/Users/Sean/VscProjects/researchOS-full-inventory/vehicle/data/experiments/carvana_full_inventory"
+  ]
+}

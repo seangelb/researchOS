@@ -150,7 +150,10 @@ def year_make_candidates(facet_path, *, expected_sha256, partition):
 
     Candidates are queries to consider, never inventory reports. Zero categories
     remain explicit source observations. Parent-model children are not inferred.
-    Positive tails keep their whole year context mandatory and unsplit. Matching
+    Positive tails keep their one-sided year filter mandatory: all declared
+    positive make/model children must cover it without narrower year clipping.
+    This does not force enumeration of the unfiltered tail as a single query.
+    Matching
     a supplied capture validates its context, not that a live request occurred;
     synthetic fixtures cannot certify endpoint support or complete inventory.
     Facet wrappers do not bind endpoint/run/page provenance by themselves. Future
@@ -173,7 +176,7 @@ def year_make_candidates(facet_path, *, expected_sha256, partition):
                 observed_year_metadata=copy.deepcopy(capture['facet_data']['year']),
                 reported_total=total, native_make_count_sum=sum(c['native_count'] for c in candidates),
                 candidates=candidates, native_zero_categories=zeros,
-                mandatory_unsplit_context=copy.deepcopy(partition) if tail and total > 0 else None,
+                mandatory_tail_year_context=copy.deepcopy(partition) if tail and total > 0 else None,
                 retained_context_validated=True, endpoint_contract_verified=False,
                 endpoint_run_page_provenance_bound=False,
                 inventory_coverage_complete=False, missing_or_noninteger_year_count=None,

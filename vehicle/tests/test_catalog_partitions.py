@@ -53,7 +53,7 @@ def test_tails_and_exact_years_cover_every_integer_once_without_native_boundary_
 
 
 @pytest.mark.parametrize('index', [0, 1, 4])
-def test_valid_context_preserves_candidates_zeros_clocks_and_positive_unsplit_tails(tmp_path, plan, index):
+def test_valid_context_preserves_candidates_zeros_clocks_and_positive_tail_year_context(tmp_path, plan, index):
     part = plan['partitions'][index]
     data = capture(part['filters'])
     path, sha = retain(tmp_path, data)
@@ -68,7 +68,7 @@ def test_valid_context_preserves_candidates_zeros_clocks_and_positive_unsplit_ta
     assert [(r['make'], r['native_count']) for r in result['native_zero_categories']] == [('Tesla', 0)]
     assert not result['native_zero_categories'][0]['inventory_report']
     assert result['candidates'][0]['filters'] == {'makes': [{'name': 'Audi'}], 'year': part['filters']['year']}
-    assert result['mandatory_unsplit_context'] == (part if index in [0, 4] else None)
+    assert result['mandatory_tail_year_context'] == (part if index in [0, 4] else None)
     assert result['retained_context_validated'] and not result['endpoint_contract_verified']
     assert not result['endpoint_run_page_provenance_bound']
     assert result['missing_or_noninteger_year_count'] is None
@@ -80,7 +80,7 @@ def test_empty_year_keeps_native_zeros_without_manufacturing_inventory(tmp_path,
     result = year_make_candidates(path, expected_sha256=sha, partition=part)
     assert result['reported_total'] == 0 and result['candidates'] == []
     assert len(result['native_zero_categories']) == 2
-    assert result['mandatory_unsplit_context'] is None
+    assert result['mandatory_tail_year_context'] is None
     assert result['partition']['mandatory'] and not result['inventory_coverage_complete']
 
 

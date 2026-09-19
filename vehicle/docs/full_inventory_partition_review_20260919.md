@@ -48,6 +48,36 @@ The hash-bound `make_006` facet source is
 Its authoritative parent report and page journal are retained alongside the
 original capture. This finding changes future partition design, not this attempt.
 
+## Seven-failure checkpoint
+
+The ledger through request 949, at `2026-09-19T13:54:55Z`, contained seven
+terminal pagination failures. Independent review matched all seven report hashes
+and 306 retained source/projection hashes. The original sweep was still running;
+this checkpoint is not its final outcome.
+
+| Query | Failed page | Retained source finding | Admitted rows before failure |
+|---|---:|---|---:|
+| Audi A5 | 4 | Exact boundary repeat; native total 127 unchanged | 72 |
+| Chevrolet, whole make | 55 | Exact boundary repeat; total 7,250 unchanged | 1,296 |
+| Chrysler Pacifica | 25 | Native total fell from 1,078 to 1,077 | 576 |
+| Dodge Charger | 11 | Exact boundary repeat; total 388 unchanged | 240 |
+| Ford F-150 | 27 | Exact boundary repeat; total 1,650 unchanged | 624 |
+| Honda Accord | 4 | Native total fell from 874 to 873 | 72 |
+| Honda CR-V | 27 | Exact boundary repeat; total 1,075 unchanged | 624 |
+
+The failed page in each query retained 24 source vehicles and admitted zero rows.
+The repeated identities had unchanged listing/VIN/year fields; all 153 reviewed
+responses were HTTP 200 JSON. The retained evidence did not show an access,
+identity or schema failure incorrectly treated as an isolated pagination gap.
+The cause of ranking-boundary repeats remains unknown. A count changing by one
+does not identify the affected vehicle or establish a sale.
+
+Pacifica and Charger source pages include 2027 vehicles. The next strategy must
+preserve these observations and both outside-year tails. Even small queries can
+fail quickly: the A5 boundary repeat and Accord count change occurred within
+roughly nine seconds of their respective first responses. Smaller groups reduce
+exposure but do not guarantee a stable enumeration.
+
 ## Next design to validate
 
 The user confirmed that access is limited to public website collection. A bulk

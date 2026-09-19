@@ -11,7 +11,7 @@ from vehicle_tracker.catalog import collect_catalog, export_catalog, preview
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--config', type=Path, default=ROOT/'config/carvana_full_inventory.json')
+    parser.add_argument('--config', type=Path, default=ROOT/'config/carvana_full_inventory_years.json')
     action = parser.add_mutually_exclusive_group()
     action.add_argument('--live', action='store_true')
     action.add_argument('--replay', type=Path)
@@ -32,7 +32,7 @@ def main(argv=None):
     if not args.config_sha256:
         parser.error('--live requires --config-sha256 from the reviewed preview')
     report = collect_catalog(args.config, expected_sha256=args.config_sha256)
-    print(json.dumps({key:report.get(key) for key in ['capture_directory','status','requests',
+    print(json.dumps({key:report.get(key) for key in ['capture_directory','partition_strategy','status','requests',
         'discovery_complete','primary_queries_complete','declared_collection_complete','primary_observed_vins','primary_scope_reconciled',
         'opening_count_residual','closing_count_residual','geographic_membership_stable','failure_type']}, indent=2))
     print('Reconciled export:', export_catalog(report['capture_directory'],
