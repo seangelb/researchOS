@@ -31,6 +31,53 @@ SOURCE_FIELDS = {
 }
 
 
+def response_diagnostics(response):
+    """Select bounded HTTP observations without retaining arbitrary server text.
+
+    Missing or unrecognized header values remain unknown. Body markers describe
+    literal matches in a prefix, not proof of a provider, block rule or root cause.
+    This metadata does not change access decisions or make the body replayable.
+    """
+    headers = {key.lower(): value for key, value in response.headers.items()
+               if isinstance(key, str)}
+
+    def header(name):
+        value = headers.get(name)
+        return value.strip() if isinstance(value, str) else ''
+
+    media_type = header('content-type').split(';', 1)[0].strip().lower()
+    if media_type not in {'application/json', 'application/problem+json', 'text/html',
+                          'text/plain', 'application/xml', 'text/xml', 'application/octet-stream'}:
+        media_type = None
+    server = re.fullmatch(
+        r'(cloudflare|cloudfront|awselb|nginx|apache|envoy|microsoft-iis|varnish)(?:/[0-9.]{1,20})?',
+        header('server').lower())
+    ray = re.fullmatch(r'([0-9a-f]{16})-([a-z]{3})', header('cf-ray').lower())
+    retry = header('retry-after')
+    content = response.content
+    prefix = content[:65536].lower() if isinstance(content, bytes) else None
+    marker_patterns = {
+        'cloudflare': (b'cloudflare', b'cf-ray'),
+        'cloudfront': (b'cloudfront',),
+        'access_denied': (b'access denied', b'access-denied', b'access_denied',
+                          b'request blocked', b'the request could not be satisfied', b'forbidden'),
+        'challenge_markup': (b'/cdn-cgi/challenge-platform/', b'cf-chl-', b'cf_chl_'),
+    }
+    status = response.status_code
+    return dict(
+        http_status=status if type(status) is int and 100 <= status <= 599 else None,
+        media_type=media_type,
+        server_family=server.group(1) if server else None,
+        cf_ray=f'{ray.group(1)}-{ray.group(2).upper()}' if ray else None,
+        cf_mitigated='challenge' if header('cf-mitigated').lower() == 'challenge' else None,
+        retry_after_seconds=int(retry) if re.fullmatch(r'[0-9]{1,10}', retry) else None,
+        body_inspected_bytes=len(prefix) if prefix is not None else None,
+        body_truncated=len(content) > 65536 if prefix is not None else None,
+        body_markers={name: any(value in prefix for value in values) if prefix is not None else None
+                      for name, values in marker_patterns.items()},
+        marker_scope='Literal matches in inspected body prefix; not proof of provider, rule or root cause.')
+
+
 def unique_object(pairs):
     """Duplicate keys must not hide an earlier unsafe value in original JSON."""
     result = {}
@@ -108,6 +155,7 @@ def retain_response_evidence(response, directory):
         response_content_sha256=hashlib.sha256(content).hexdigest(),
         response_content_bytes=len(content),
         response_hash_scope=RESPONSE_SCOPE,
+        http_diagnostics=response_diagnostics(response),
         source_path=None, source_sha256=None, source_hash_scope=None,
         limitation='Non-JSON or access-failure body not retained; body replay unavailable.')
     if response.status_code != 200 or 'application/json' not in response.headers.get('content-type', ''):
