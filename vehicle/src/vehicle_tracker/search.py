@@ -31,6 +31,26 @@ def build_search_request(*, filters, zip_code, page=1, location_filter=False):
     return request
 
 
+def _validate_pagination(pagination, request, vehicles):
+    for key in ('currentPage', 'pageSize', 'totalMatchedInventory', 'totalMatchedPages'):
+        if type(pagination[key]) is not int or pagination[key] < 0:
+            raise ValueError('Invalid pagination count')
+    if (any(type(request['pagination'][key]) is not int for key in ('page', 'pageSize'))
+            or pagination['currentPage'] != request['pagination']['page']
+            or pagination['pageSize'] != request['pagination']['pageSize']):
+        raise ValueError('Returned pagination differs from the requested page')
+    total, pages = pagination['totalMatchedInventory'], pagination['totalMatchedPages']
+    # Retain either native empty-first-page convention; never rewrite its count.
+    empty_first_page = (total == 0 and vehicles == [] and pagination['currentPage'] == 1
+                        and pagination['pageSize'] == 24 and pages in (0, 1))
+    if (pagination['pageSize'] != 24 or not isinstance(vehicles, list)
+            or (total == 0 and not empty_first_page)
+            or (total > 0 and pages != (total + 23) // 24)):
+        raise ValueError('Inconsistent search pagination; coverage cannot be established')
+    if len(vehicles) > min(24, total):
+        raise ValueError('More vehicles than the declared batch or total')
+
+
 def project_response(data, request, *, observed_at):
     """Retain public inventory fields only; this is not an original response body.
 
@@ -47,15 +67,7 @@ def project_response(data, request, *, observed_at):
     if not isinstance(data.get('userDeliveryInfo', {}), dict):
         raise ValueError('Invalid delivery context shape')
     pagination = inventory['pagination']
-    for key in ('currentPage', 'pageSize', 'totalMatchedInventory', 'totalMatchedPages'):
-        if type(pagination[key]) is not int or pagination[key] < 0:
-            raise ValueError('Invalid pagination count')
-    if pagination['currentPage'] != request['pagination']['page'] or pagination['pageSize'] != request['pagination']['pageSize']:
-        raise ValueError('Returned pagination differs from the requested page')
-    if pagination['pageSize'] != 24 or pagination['totalMatchedPages'] != (pagination['totalMatchedInventory'] + 23) // 24:
-        raise ValueError('Inconsistent search pagination; coverage cannot be established')
-    if len(inventory['vehicles']) > min(24, pagination['totalMatchedInventory']):
-        raise ValueError('More vehicles than the declared batch or total')
+    _validate_pagination(pagination, request, inventory['vehicles'])
     safe_request = {k: request[k] for k in ('filters', 'pagination', 'sortBy', 'zip5')}
     if 'requestedFeatures' in request:
         safe_request['requestedFeatures'] = request['requestedFeatures']
@@ -78,7 +90,8 @@ def parse_search_capture(capture):
         raise ValueError('Unexpected source or pagination')
     if capture.get('zip_code') != capture['requested_zip']:
         raise ValueError('Returned ZIP differs from requested context or is missing')
-    if not capture['vehicles'] and capture['pagination']['totalMatchedInventory'] == capture['pagination']['totalMatchedPages'] == 0:
+    _validate_pagination(capture['pagination'], capture['request'], capture['vehicles'])
+    if capture['pagination']['totalMatchedInventory'] == 0:
         return pd.DataFrame(columns=['retailer', 'listing_id', 'vin', 'observed_at_utc',
             'year', 'make', 'model', 'mileage_miles', 'asking_price_usd', 'condition_native',
             'availability_native', 'card_text', 'listing_url', 'source_url'])

@@ -134,6 +134,72 @@ def validate_context(capture, facets, query):
         raise ValueError('Recovery native applied model differs')
 
 
+def _reviewed_empty_failure(config):
+    """Recognize one audited client bug, retaining its failed attempt and stop bytes."""
+    review = config.get('reviewed_empty_page_failure')
+    if review is None:
+        return None, {}
+    if digest(review['path']) != review['sha256']:
+        raise ValueError('Empty-page diagnosis changed')
+    diagnosis = load(review['path'])
+    bindings = diagnosis['bindings']
+    for path, sha in bindings.items():
+        if digest(path) != sha:
+            raise ValueError('Reviewed empty-page evidence changed')
+        if Path(path).suffix == '.sqlite' and any(
+                Path(str(path)+suffix).exists() for suffix in ('-wal', '-shm', '-journal')):
+            raise ValueError('Reviewed empty-page database has unsettled sidecars')
+    folder = Path(diagnosis['capture_directory']).resolve()
+    if (folder.parent not in _capture_roots(config)
+            or folder.parent == Path(config['capture_root']).resolve()):
+        raise ValueError('Reviewed failure must remain a locked peer, never the new destination')
+    report = _bound(folder/'catalog_report.json', bindings[str(folder/'catalog_report.json')], bindings)
+    budget = _bound(folder/'catalog_budget.json', bindings[str(folder/'catalog_budget.json')], bindings)
+    stop = _bound(folder.parent/'access_stop.json', bindings[str(folder.parent/'access_stop.json')], bindings)
+    first = report['entries'][0]
+    child = _bound(first['report'], first['report_sha256'], bindings)
+    page = child['pages'][0]
+    response = page['response_evidence']
+    source = _bound(response['source_path'], response['source_sha256'], bindings)
+    original = _bound(folder/'selected_config.json', report['config_sha256'], bindings)
+    if (diagnosis['one_request_fully_reconciled'] is not True
+            or diagnosis['native_applied_context_verified'] is not False
+            or diagnosis['exact_reproduced_error'] != 'Inconsistent search pagination; coverage cannot be established'
+            or not same(source['inventory'], dict(vehicles=[], pagination=dict(
+                currentPage=1, pageSize=24, totalMatchedInventory=0, totalMatchedPages=1)))
+            or source['userDeliveryInfo']['zip5'] != '08542'
+            or report['status'] != 'stopped' or report['requests'] != 1
+            or len(report['entries']) != 500 or len(child['pages']) != 1
+            or any(e['status'] != 'unattempted' for e in report['entries'][1:])
+            or child['outcome_kind'] != 'schema_failure' or child['query_complete'] is not False
+            or child['unique_listings'] != 0 or page['stored_rows'] != 0
+            or page['http_status'] != 200 or page.get('facet_source')
+            or response['http_diagnostics']['media_type'] != 'application/json'
+            or any(response['http_diagnostics']['body_markers'].values())
+            or budget['budget']['requests'] != 1 or budget['budget']['pending_request'] is not False
+            or budget['budget']['stopped'] is not True
+            or stop['run'] != str(folder/'catalog_report.json')
+            or config['plan_sha256'] != report['plan_sha256']
+            or config['authorized_cycle_date'] != report['cycle_date']
+            or config['max_requests'] > original['max_requests'] - 1
+            or config.get('absolute_window_end') != report['window_end']):
+        raise ValueError('Review does not identify only the exact empty-page client failure')
+    return folder, {**bindings, str(Path(review['path']).resolve()): review['sha256']}
+
+
+def _recovery_root_states(config):
+    folder, _ = _reviewed_empty_failure(config)
+    states = [_capture_root_state(root) for root in _capture_roots(config)]
+    for state in states:
+        if folder is not None and Path(state['capture_root']) == folder.parent:
+            expected = [dict(capture_directory=str(folder), reason='Durable catalog budget remains stopped')]
+            if not state['access_stopped'] or state['unresolved_invocations'] != expected:
+                raise ValueError('Reviewed peer has another or changed unresolved invocation')
+            state.update(retained_access_stopped=True, reviewed_client_failure=str(folder),
+                         access_stopped=False, unresolved_invocations=[], blocked=False)
+    return states
+
+
 def preview(path, *, now=None):
     config, plan = settings(path)
     now = now or utcnow()
@@ -143,9 +209,13 @@ def preview(path, *, now=None):
         raise ValueError('Recovery is authorized for one explicit local date only')
     midnight = datetime.combine(day+timedelta(days=1), datetime.min.time(), zone)
     end = min(now+timedelta(seconds=config['max_seconds']), midnight-timedelta(microseconds=1))
+    if config.get('absolute_window_end'):
+        end = min(end, aware(config['absolute_window_end']))
+    if end <= now:
+        raise ValueError('Recovery original deadline has passed')
     folder = Path(config['capture_root'])/day.isoformat()
     own_prior = [p for p in folder.parent.glob('*') if p.is_dir()]
-    states = [_capture_root_state(root) for root in _capture_roots(config)]
+    states = _recovery_root_states(config)
     return dict(config=config, config_sha256=digest(path), cycle_date=day.isoformat(),
         window_start=now.isoformat(), window_end=end.isoformat(), destination=str(folder),
         destination_fresh=not folder.exists() and not own_prior, capture_root_states=states,
@@ -164,7 +234,7 @@ def collect_recovery(config_path, *, expected_sha256, post=None):
         for root in _capture_roots(config):
             root.mkdir(parents=True, exist_ok=True)
             locks.enter_context(cycle_lock(root))
-        _require_clear_roots([_capture_root_state(root) for root in _capture_roots(config)])
+        _require_clear_roots(_recovery_root_states(config))
         if any(p.is_dir() for p in folder.parent.glob('*')):
             raise ValueError('Recovery is one-shot; a prior attempt is retained')
         config, plan = settings(config_path)
@@ -340,6 +410,8 @@ def export_recovery(folder, *, output):
             or state['timezone'] != config['timezone'] or state['cycle_date'] != report['cycle_date']
             or state['cycle_date'] != config['authorized_cycle_date']
             or (aware(state['window_end'])-aware(state['window_start'])).total_seconds() > config['max_seconds']
+            or (config.get('absolute_window_end')
+                and aware(state['window_end']) > aware(config['absolute_window_end']))
             or (report['status'] == 'collection_finished' and budget['stopped'])
             or state['window_start'] != report['window_start'] or state['window_end'] != report['window_end']):
         raise ValueError('Recovery durable ledger is uncertain or differs')
@@ -347,6 +419,8 @@ def export_recovery(folder, *, output):
     if {p.name for p in folder.iterdir() if p.is_dir()} - expected_dirs - {'analysis'}:
         raise ValueError('Recovery has undeclared child directories')
     sources = dict(plan['source_hashes'])
+    _, review_sources = _reviewed_empty_failure(config)
+    sources.update(review_sources)
     for name in ['catalog_report.json','catalog_budget.json','selected_config.json','selected_plan.json']:
         sources[str(folder/name)] = digest(folder/name)
     frames, ledger, reports, starts, responses = [], [], [], [], []

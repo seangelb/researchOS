@@ -26,6 +26,22 @@ apart. It locks all declared related catalog roots and preserves their stop stat
 A later date or an existing recovery attempt cannot become an automatic retry.
 No original pages, failed records, budgets or completeness flags are rewritten.
 
+The first recovery stopped after one HTTP 200 response and accepted zero rows.
+Carvana returned an empty first page with zero inventory and one native page;
+the client incorrectly required zero pages. The retained source, request ledger,
+database and 500-child export reconcile, and the capture and stop record were
+backed up and restored. Native applied filters were not reached, so this response
+does not establish a validated zero for that category.
+
+The parser correction accepts only empty first-page responses with zero inventory
+and native page count zero or one. A separately reviewed fresh configuration,
+`carvana_gap_recovery_empty_fix_20260919.json`, binds the exact independent
+diagnosis and all 89 retained evidence/code/export hashes. It keeps the failed
+root locked and its stop marker unchanged; any other failure or changed evidence
+still blocks collection. It uses the remaining 5,999 requests and the original
+22:13:10.360920 UTC deadline. It does not restart the failed destination, relax
+native filter validation, or make an automatic access-failure retry.
+
 ## Preview and inspect
 
 `vehicle/scripts/run_carvana_gap_recovery.py` previews the frozen plan without

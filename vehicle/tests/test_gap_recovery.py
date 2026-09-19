@@ -112,6 +112,20 @@ def run(e, *, limit=None, mode=None):
     return recovery.collect_recovery(e.path,expected_sha256=recovery.digest(e.path),post=e.send)
 
 
+def test_replay_rejects_report_and_budget_deadline_extension(experiment, tmp_path):
+    e = experiment
+    e.config['absolute_window_end']='2026-09-19T14:00:00+00:00'
+    write(e.path,e.config)
+    report = run(e,limit=1)
+    assert report['window_end']==e.config['absolute_window_end']
+    budget = recovery.load(e.folder/'catalog_budget.json')
+    budget['window_end']=report['window_end']='2026-09-19T14:00:01+00:00'
+    write(e.folder/'catalog_budget.json',budget)
+    write(e.folder/'catalog_report.json',report)
+    with pytest.raises(ValueError,match='durable ledger'):
+        recovery.export_recovery(e.folder,output=tmp_path/'extended')
+
+
 def test_preview_full_denominator_no_writes_and_plan_mutation_blocks(experiment):
     e=experiment
     before={str(p):p.read_bytes() for p in e.path.parent.rglob('*') if p.is_file()}
@@ -170,6 +184,29 @@ def test_make_only_and_one_sided_zero_contexts(experiment):
     facet['facet_data']['year']['appliedMin']=2010
     with pytest.raises(ValueError,match='open tail'):
         recovery.validate_context(capture,facet,q)
+
+
+def test_native_one_page_empty_children_progress_and_export(experiment,tmp_path):
+    e=experiment;original_send=e.send
+    def send(url,**kwargs):
+        response=original_send(url,**kwargs)
+        data=response.json()
+        assert data['inventory']['vehicles']==[]
+        data['inventory']['pagination']['totalMatchedPages']=1
+        response.content=json.dumps(data).encode()
+        return response
+    e.send=send
+    report=run(e,limit=2)
+    assert len(e.requests)==2
+    assert all(x['query_complete'] and x['context_validated'] for x in report['entries'][:2])
+    assert all(x['status']=='unattempted' for x in report['entries'][2:])
+    for entry in report['entries'][:2]:
+        child=recovery.load(entry['report']);capture=recovery.load(child['pages'][0]['retained_source'])
+        assert capture['pagination']['totalMatchedPages']==1
+    output=recovery.export_recovery(e.folder,output=tmp_path/'export')
+    coverage=pd.read_csv(output/'child_coverage.csv')
+    assert len(coverage)==500 and coverage.child_complete.sum()==2
+    assert pd.read_csv(output/'observations.csv').empty
 
 
 def test_shared_lock_and_peer_stop_prevent_requests(experiment):

@@ -1,0 +1,37 @@
+{
+  "format": "carvana-gap-recovery-v1",
+  "endpoint": "https://apik.carvana.io/merch/search/api/v2/search",
+  "primary_zip": "08542",
+  "location_filter": false,
+  "page_size": 24,
+  "sort": "MostPopular",
+  "minimum_spacing_seconds": 3,
+  "max_requests": 5999,
+  "max_seconds": 21600,
+  "timezone": "America/New_York",
+  "capture_root": "C:\\Users\\Sean\\VscProjects\\researchOS-empty-page-fix\\vehicle\\data\\experiments\\carvana_gap_recovery_empty_fix",
+  "related_capture_roots": [
+    "C:\\Users\\Sean\\VscProjects\\researchOS\\vehicle\\data\\experiments\\carvana_full_inventory",
+    "C:\\Users\\Sean\\VscProjects\\researchOS\\vehicle\\data\\experiments\\carvana_full_inventory_years",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-full-inventory\\vehicle\\data\\experiments\\carvana_full_inventory",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-full-inventory\\vehicle\\data\\experiments\\carvana_full_inventory_years",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-catalog-partitioning\\vehicle\\data\\experiments\\carvana_full_inventory",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-catalog-partitioning\\vehicle\\data\\experiments\\carvana_full_inventory_years",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-gap-recovery\\vehicle\\data\\experiments\\carvana_full_inventory",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-gap-recovery\\vehicle\\data\\experiments\\carvana_full_inventory_years",
+    "C:\\Users\\Sean\\VscProjects\\researchOS\\vehicle\\data\\experiments\\carvana_gap_recovery",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-gap-recovery\\vehicle\\data\\experiments\\carvana_gap_recovery",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-empty-page-fix\\vehicle\\data\\experiments\\carvana_full_inventory",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-empty-page-fix\\vehicle\\data\\experiments\\carvana_full_inventory_years",
+    "C:\\Users\\Sean\\VscProjects\\researchOS\\vehicle\\data\\experiments\\carvana_gap_recovery_empty_fix"
+  ],
+  "plan_path": "C:\\Users\\Sean\\VscProjects\\researchOS-gap-recovery\\vehicle\\config\\carvana_gap_recovery_20260919_plan.json",
+  "plan_sha256": "f61adc9ae58aaa3beaea7910239a2247b922d0c9be05694c0daa4d948b67bd7c",
+  "authorization_basis": "User requested completion of the 25 query gaps. Independent review identified a client parser incompatibility: one HTTP200 empty first page reported zero inventory and one native page. This fresh bounded attempt follows the narrow parser correction, retains and locks the failed peer and unchanged stop marker, binds the exact reviewed diagnosis and all its evidence, and preserves the remaining 5999 requests and original deadline. No access-failure retry, original restart, budget extension, altered query order or invented zero context.",
+  "authorized_cycle_date": "2026-09-19",
+  "absolute_window_end": "2026-09-19T22:13:10.360920+00:00",
+  "reviewed_empty_page_failure": {
+    "path": "C:\\Users\\Sean\\Documents\\ChatGPT\\ResearchOS\\carvana_full_inventory_20260919\\gap_empty_pagination_diagnosis_20260919T161738125694Z.json",
+    "sha256": "7905abeed63f342aa6a5777cabf4faee294ff823131b1ff54642eaff8f842d4c"
+  }
+}
