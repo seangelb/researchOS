@@ -280,11 +280,9 @@ def _collect_search(*, filters, zip_code, destination, target_listings, budget, 
             if retain_facets and number == 1:
                 # Discovery uses this same charged response, never a second probe.
                 from vehicle_tracker.facets import select_facets
-                from vehicle_tracker.search_evidence import unique_object
-                data = json.loads(response.content, object_pairs_hook=unique_object)
                 selected = dict(request=request, captured_at_utc=stamp,
                     zip_code=capture['zip_code'], pagination=capture['pagination'],
-                    facet_data=select_facets(data))
+                    facet_data=select_facets(source))
                 stage = 'storage_failure'
                 facet_path = retain_capture(selected, destination/'facets')
                 entry.update(facet_source=str(facet_path),

@@ -42,6 +42,22 @@ still blocks collection. It uses the remaining 5,999 requests and the original
 22:13:10.360920 UTC deadline. It does not restart the failed destination, relax
 native filter validation, or make an automatic access-failure retry.
 
+That corrected attempt also stopped after one HTTP 200 response, with zero rows
+accepted. Empty pagination now replays successfully; a required field access
+inside facet selection failed. The previous source contract omitted facet data,
+so the exact missing field cannot be inferred from either retained response.
+Both attempts and their stop records remain immutable and restore-verified.
+
+The source contract now retains only the public make/model/year facet fields
+before strict validation. Unknown fields are omitted, unsafe strings are redacted,
+and missing values remain missing. Collection and replay select facets from those
+same verified source bytes. A separately reviewed one-request diagnostic of the
+original first query is needed to establish the actual empty-response layout;
+this consumes one of the remaining recovery requests within the original deadline.
+It does not resume the 500-query run or claim that an unverified empty result is
+complete coverage. The overall recovery has no reliable finish time until this
+live schema uncertainty is resolved.
+
 ## Preview and inspect
 
 `vehicle/scripts/run_carvana_gap_recovery.py` previews the frozen plan without

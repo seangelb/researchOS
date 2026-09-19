@@ -23,11 +23,17 @@ VEHICLE = {key: None for key in (
     'vehicleInventoryType', 'isOnDemand', 'transportCost',
     'previousPrice', 'priceUpdateDate')}
 VEHICLE['price'] = {'total': None}
+FACET_LABEL = r"[A-Za-z0-9 .()/'&+\-]{1,100}"
+FACET_MAKES = object()  # Dynamic public make labels, not arbitrary object keys.
+FACET_MODEL = {'key': None, 'count': None, 'isApplied': None, 'modelIds': [None]}
+FACET_MAKE = {'key': None, 'count': None, 'isApplied': None, 'parentModels': [FACET_MODEL]}
 SOURCE_FIELDS = {
     'inventory': {'pagination': {key: None for key in (
         'currentPage', 'pageSize', 'totalMatchedInventory', 'totalMatchedPages')},
         'vehicles': [VEHICLE]},
     'userDeliveryInfo': {'zip5': None},
+    'facetData': {'year': {key: None for key in ('min', 'max', 'appliedMin', 'appliedMax')},
+                  'makes': FACET_MAKES},
 }
 
 
@@ -97,6 +103,14 @@ def public_source(value, fields=SOURCE_FIELDS, *, key='', changes=None):
     which source information can be retained safely, including malformed shapes.
     """
     changes = changes if changes is not None else []
+    if fields is FACET_MAKES and isinstance(value, dict):
+        selected = {}
+        for name, bucket in value.items():
+            if not isinstance(name, str) or not re.fullmatch(FACET_LABEL, name):
+                changes.append('redacted_value')
+                continue
+            selected[name] = public_source(bucket, FACET_MAKE, key='make_bucket', changes=changes)
+        return selected
     if key == 'priceUpdateDate' and value is not None:
         # Only the observed UTC timestamp form is public; validate the actual
         # calendar/time too, without converting this native clock to our clock.
@@ -124,11 +138,11 @@ def public_source(value, fields=SOURCE_FIELDS, *, key='', changes=None):
     if isinstance(value, str):
         patterns = {'vin': r'[A-HJ-NPR-Z0-9]{17}', 'zip5': r'\d{5}',
                     'vehicleId': r'\d{1,12}'}
-        text_fields = {'make', 'model', 'parentModel', 'vehiclePurchaseType'}
+        text_fields = {'make', 'model', 'parentModel', 'vehiclePurchaseType', 'key'}
         if key in patterns:
             pattern = patterns[key]
         elif key in text_fields:
-            pattern = r"[A-Za-z0-9 .()/'&+\-]{1,100}"
+            pattern = FACET_LABEL
         else:
             pattern = r'-?\d+(\.\d+)?'
         if fields is None and re.fullmatch(pattern, value):
