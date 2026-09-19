@@ -140,8 +140,11 @@ def _snapshot_reconciliation(entry, inputs, report, sources):
             raise ValueError('Snapshot reconciliation audit does not bind current evidence')
     failures = [failure for failure in audit['failures']
                 if _path(failure['journal_path']) == journal_path]
+    if len(failures) != 1 or not isinstance(failures[0].get('query_id'), str) or not failures[0]['query_id']:
+        raise ValueError('Snapshot reconciliation requires one identified failure journal')
+    audit_query_id = failures[0]['query_id']
     queries = [query for query in audit['query_reconciliation']
-               if query['query_id'] == report.get('query_id')]
+               if query['query_id'] == audit_query_id]
     pages = [page for page in report['pages'] if page.get('error')]
     if (report.get('query_complete') is not False or report.get('status') != 'blocked'
             or report.get('outcome_kind') != 'storage_failure'
@@ -156,7 +159,7 @@ def _snapshot_reconciliation(entry, inputs, report, sources):
             or query.get('verified_rows') != report['unique_listings']
             or query.get('attempted_requests') != len(report['pages']) or query.get('failed_requests') != 1
             or query.get('reason') != page['error'] or report.get('reason') != page['error']
-            or failure.get('query_id') != report.get('query_id')
+            or ('query_id' in report and report['query_id'] != audit_query_id)
             or journal_path != _path(str(Path(entry['report_path']).parent/'attempts'/f"{page['page']:04d}.json"))):
         raise ValueError('Snapshot reconciliation failure state differs')
     matched = [source for source in sources if source['page'] == page['page']]

@@ -371,12 +371,20 @@ def test_standalone_projection_requires_exact_parent_binding(tmp_path, response_
 @pytest.mark.parametrize('mutation', [None, 'undeclared', 'audit_hash', 'report_binding',
     'database_binding', 'journal_binding', 'audit_journal', 'journal_identity',
     'not_parsed', 'confirmed', 'complete', 'audit_parity', 'audit_count',
-    'snapshot_error', 'snapshot_row', 'wrong_witness'])
-def test_audited_post_storage_failure_keeps_both_error_states(tmp_path, response_data, mutation):
+    'snapshot_error', 'snapshot_row', 'wrong_witness', 'audit_query_mapping', 'report_query_mapping',
+    'null_report_query'])
+@pytest.mark.parametrize('child_query_id', [None, 'first'])
+def test_audited_post_storage_failure_keeps_both_error_states(tmp_path, response_data, mutation, child_query_id):
     report, capture = query(tmp_path, response_data)
     database = tmp_path/'snapshots.sqlite'
     store_capture(database, run_id='query-one', page_number=1, raw_file=capture)
     value = json.loads(report.read_text())
+    if child_query_id is None:
+        value.pop('query_id')  # Actual standalone child reports do not carry the plan query ID.
+    if mutation == 'report_query_mapping':
+        value['query_id'] = 'unrelated-query'
+    elif mutation == 'null_report_query':
+        value['query_id'] = None
     error = 'PermissionError: storage_failure'
     value.update(status='blocked', query_complete=False, outcome_kind='storage_failure', reason=error)
     page = value['pages'][0]
@@ -412,6 +420,8 @@ def test_audited_post_storage_failure_keeps_both_error_states(tmp_path, response
         audit_value['query_reconciliation'][0]['source_sqlite_parity'] = False
     elif mutation == 'audit_count':
         audit_value['query_reconciliation'][0]['verified_rows'] = 4
+    elif mutation == 'audit_query_mapping':
+        audit_value['query_reconciliation'][0]['query_id'] = 'unrelated-query'
     audit = write(tmp_path/'audit.json', audit_value)
     declaration = dict(path=str(audit), sha256=file_hash(audit),
                        journal_path=str(journal), journal_sha256=file_hash(journal))
@@ -429,6 +439,7 @@ def test_audited_post_storage_failure_keeps_both_error_states(tmp_path, response
         assert read(selected).empty  # The later audit delays publication, not original evidence.
         rows = read(selected, cutoff=LATER)
         assert len(rows) == 3 and rows.source_query_complete.eq(0).all()
+        assert rows.query_id.isna().all() if child_query_id is None else rows.query_id.eq(child_query_id).all()
         assert rows.original_evidence_available_at.isna().all()
         alias = json.loads(rows.source_aliases_json.iloc[0])[0]
         assert alias['original_report_error'] == error and alias['snapshot_capture_error'] is None
