@@ -79,7 +79,13 @@ To independently replay a terminal capture into another fresh export destination
 Replay checks the durable request ledger, page journals, source hashes, native
 discovery plan, request spacing/windows and source-to-collector-SQLite parity.
 It writes primary observations, a coverage ledger, geographic comparisons, a
-per-run history SQLite database and a hash manifest. Discovery/validation samples
+per-make count reconciliation, a per-run history SQLite database and a hash
+manifest. Every declared query stays in the ledger, including unattempted work.
+`declared_collection_complete` means discovery, primary pages and declared ZIP
+checks finished. Count residuals and ZIP membership differences remain separate
+diagnostics; finishing the collection does not establish national completeness.
+Per-make observed counts are lower bounds when any leaf is incomplete.
+Discovery/validation samples
 are excluded from primary inventory except a make probe that actually completed.
 Transport-uncertain or storage-unreconciled attempts stay blocked for import, with
 their original journals retained. Exports are new vintages, never overwrites.
@@ -92,6 +98,14 @@ query-comparison gates require complete matching contexts before absence analysi
 dynamic partition changes require comparing a compatible subset or a reviewed
 whole-population reconciliation. First-seen history can use valid positive rows
 from partial captures. Missingness cannot.
+
+`vehicle_tracker.catalog_history.observed_catalog_history` reads explicitly
+selected catalog exports and legacy cycle/database pairs, verifies their retained
+evidence, and returns VIN history, first-observed cohorts and source memberships.
+It preserves distinct same-date attempts and differing query scopes. Catalog
+analysis becomes available at its export publication time; actual observations
+keep their original source clocks. This adapter produces no absence or sales
+classification. Notebook 25 exposes these inputs without collecting or writing.
 
 Review Notebook 25 for the expanded collector's saved reports, then Notebook 20
 for existing comparable-history analysis and Notebook 24 for native-status

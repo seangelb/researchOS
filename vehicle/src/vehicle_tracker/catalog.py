@@ -21,6 +21,13 @@ from vehicle_tracker.search import ENDPOINT, collect_search, search_transport
 from vehicle_tracker.search_plan import verify_isolated_pagination
 from vehicle_tracker.storage import read_snapshots, write_json_atomic
 
+MAKE_RECONCILIATION_COLUMNS = ('''make discovery_query_id discovery_observed_at_utc
+    discovery_native_count native_model_count_sum native_model_count_residual
+    declared_leaf_queries attempted_leaf_queries completed_leaf_queries all_leaf_queries_complete
+    leaf_reported_total_sum observed_rows observed_unique_vins duplicate_memberships
+    discovery_minus_leaf_native_count discovery_minus_observed_vins leaf_native_minus_observed_vins
+    inventory_observation_start inventory_observation_end observed_count_scope''').split()
+
 
 def utcnow():
     return datetime.now(timezone.utc)
@@ -75,6 +82,7 @@ def preview(path, *, now=None):
 
 def native_makes(capture):
     """Fail closed on an unaccounted broad category; never silently drop it."""
+    _validate_discovery(capture)
     buckets = capture['facet_data']['makes']
     if capture['request']['filters'] or not buckets:
         raise ValueError('Require nonempty unfiltered make facets')
@@ -87,12 +95,29 @@ def native_makes(capture):
     return sorted(buckets)
 
 
+def _validate_discovery(capture):
+    """All-year discovery must preserve valid native categories, including zeros."""
+    year = capture['facet_data']['year']
+    if any(year.get(key) is not None for key in ('appliedMin', 'appliedMax')):
+        raise ValueError('Unexpected applied year boundary in all-year discovery')
+    for bucket in capture['facet_data']['makes'].values():
+        for value in [bucket['count'], *(child['count'] for child in bucket['parentModels'])]:
+            if type(value) is not int or value < 0:
+                raise ValueError('Invalid native discovery count')
+        for child in bucket['parentModels']:
+            if child['isApplied'] is not False:
+                raise ValueError('Unexpected applied model filter in discovery')
+            if any(type(value) is not int or value < 0 for value in child['modelIds']):
+                raise ValueError('Invalid native discovery model ID')
+
+
 def model_partitions(capture, make, zip_code, prefix):
     """Split only when native model counts and IDs form a partition; else whole make.
 
     An all-year whole-make fallback preserves unknown models and year boundaries.
     Its pagination may fail; that failure stays visible, never repaired by deduping.
     """
+    _validate_discovery(capture)
     whole = [query(prefix+'_all', zip_code, {'makes': [{'name': make}]})]
     buckets = capture['facet_data']['makes']
     total = capture['pagination']['totalMatchedInventory']
@@ -138,6 +163,61 @@ def _rows(folder):
     return read_snapshots(path)[1] if path.is_file() else pd.DataFrame()
 
 
+def _make_reconciliation(report, primary):
+    """Expose category drift and unknown coverage without cancelling residuals."""
+    entries = {entry['query']['query_id']: entry for entry in report['entries']}
+    records = []
+    for probe in report.get('planned_make_probes', []):
+        make = probe['filters']['makes'][0]['name']
+        discovery = entries.get(probe['query_id'], {})
+        leaves = [q for q in report['leaf_queries'] if q['filters']['makes'][0]['name'] == make]
+        leaf_entries = [entries.get(q['query_id'], {}) for q in leaves]
+        frames = [primary[q['query_id']] for q in leaves
+                  if q['query_id'] in primary and not primary[q['query_id']].empty]
+        rows = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
+        native = discovery.get('reported_total')
+        model_total = discovery.get('native_model_count_sum')
+        leaf_total = (sum(e['reported_total'] for e in leaf_entries)
+                      if leaves and all(e.get('reported_total') is not None for e in leaf_entries) else None)
+        distinct = int(rows.vin.nunique()) if not rows.empty else 0
+        clocks = pd.to_datetime(rows.observed_at_utc, utc=True, format='ISO8601') if not rows.empty else None
+        records.append(dict(make=make, discovery_query_id=probe['query_id'],
+            discovery_observed_at_utc=discovery.get('discovery_observed_at_utc'),
+            discovery_native_count=native, native_model_count_sum=model_total,
+            native_model_count_residual=native-model_total if native is not None and model_total is not None else None,
+            declared_leaf_queries=len(leaves),
+            attempted_leaf_queries=sum(bool(e.get('report')) for e in leaf_entries),
+            completed_leaf_queries=sum(bool(e.get('query_complete')) for e in leaf_entries),
+            all_leaf_queries_complete=bool(leaves and all(e.get('query_complete') for e in leaf_entries)),
+            leaf_reported_total_sum=leaf_total, observed_rows=len(rows), observed_unique_vins=distinct,
+            duplicate_memberships=int(rows.duplicated(['retailer','vin']).sum()) if not rows.empty else 0,
+            discovery_minus_leaf_native_count=native-leaf_total if native is not None and leaf_total is not None else None,
+            discovery_minus_observed_vins=native-distinct if native is not None else None,
+            leaf_native_minus_observed_vins=leaf_total-distinct if leaf_total is not None else None,
+            inventory_observation_start=clocks.min().isoformat() if clocks is not None else None,
+            inventory_observation_end=clocks.max().isoformat() if clocks is not None else None,
+            observed_count_scope=('Retained positive observations only; incomplete/unattempted leaves '
+                                  'give lower bounds, not zero inventory or evidence of absence.')))
+    return records
+
+
+def _discovery_probes(config):
+    return [dict(query=query('broad_open', config['primary_zip'], {}), role='discovery'),
+            *(dict(query=query('broad_zip_'+z, z, {}), role='geographic_discovery')
+              for z in config['validation_zips']),
+            dict(query=query('broad_close', config['primary_zip'], {}), role='closing_discovery')]
+
+
+def _planned_coverage(report):
+    """Every declared query remains in the denominator after an early stop."""
+    planned = [(p['query'], p['role']) for p in report['planned_discovery_probes']]
+    planned.extend((q, 'make_discovery') for q in report.get('planned_make_probes', []))
+    planned.extend((q, 'primary_inventory') for q in report['leaf_queries'])
+    planned.extend((check['query'], 'geographic_inventory')
+                   for check in report.get('planned_geographic_checks', []))
+    return planned
+
+
 def collect_catalog(config_path, *, expected_sha256, post=None):
     """One fresh local-date invocation, one shared durable budget, no retry/resume."""
     start = preview(config_path)
@@ -172,8 +252,9 @@ def collect_catalog(config_path, *, expected_sha256, post=None):
         report = dict(format='carvana-full-inventory-run-v1', started_at=utcnow().isoformat(),
             capture_directory=str(folder),
             config_sha256=expected_sha256, cycle_date=start['cycle_date'], status='running',
+            planned_discovery_probes=_discovery_probes(config),
             entries=[], leaf_queries=[], makes=[], discovery_complete=False,
-            primary_queries_complete=False, national_coverage_verified=False,
+            primary_queries_complete=False, declared_collection_complete=False, national_coverage_verified=False,
             estimated_sales=None, requests=0,
             window_start=start['window_start'], window_end=start['window_end'],
             code_hashes={str(p): digest(p) for p in sorted(Path(__file__).parent.glob('*.py'))})
@@ -211,6 +292,8 @@ def collect_catalog(config_path, *, expected_sha256, post=None):
             rows = _rows(child)
             if not rows.empty:
                 known.update(zip(rows.listing_id, rows.vin))
+            if role == 'primary_inventory':
+                primary[q['query_id']] = rows
             save()
             if not budget.stopped:
                 budget.timeout_ms()  # Even the final response must arrive inside the window.
@@ -234,7 +317,12 @@ def collect_catalog(config_path, *, expected_sha256, post=None):
                     if not probe or budget.stopped:
                         break
                     # Validate facet application even when the first page is complete.
-                    children, reason = model_partitions(_facets(probe), make, q['zip_code'], q['query_id'])
+                    facets = _facets(probe)
+                    children, reason = model_partitions(facets, make, q['zip_code'], q['query_id'])
+                    models = facets['facet_data']['makes'].get(make, {}).get('parentModels', [])
+                    report['entries'][-1].update(
+                        discovery_observed_at_utc=facets['captured_at_utc'],
+                        native_model_count_sum=sum(child['count'] for child in models) if models else None)
                     if probe['query_complete']:
                         # Reuse <=24 rows (including empty makes): zero extra requests.
                         children, reason = [q], 'complete make probe reused'
@@ -303,11 +391,16 @@ def collect_catalog(config_path, *, expected_sha256, post=None):
                 report['geographic_checks_complete'] = bool(report['planned_geographic_checks']
                     and len(report['geographic_checks']) == len(report['planned_geographic_checks'])
                     and all(c['complete'] for c in report['geographic_checks'])
-                    and all(e.get('additional_makes') == [] for e in report['entries']
+                    and all(e.get('additional_makes') is not None for e in report['entries']
                             if e['role'] == 'geographic_discovery'))
                 report['geographic_membership_stable'] = bool(report['geographic_checks_complete']
                     and all(c['additional_vins'] == c['primary_vins_not_seen'] == []
-                            for c in report['geographic_checks']))
+                            for c in report['geographic_checks'])
+                    and all(e.get('additional_makes') == [] for e in report['entries']
+                            if e['role'] == 'geographic_discovery'))
+                report['declared_collection_complete'] = bool(not budget.stopped
+                    and report['primary_queries_complete'] and report['geographic_checks_complete']
+                    and 'closing_total' in report)
                 report['coverage_note'] = ('A sequential observed union, not a point-in-time census. '
                     'Opening/closing counts and sampled ZIP membership cannot prove national completeness.')
                 report['status'] = 'collection_finished' if not budget.stopped else 'stopped'
@@ -319,6 +412,18 @@ def collect_catalog(config_path, *, expected_sha256, post=None):
                 if not isinstance(error, Exception):
                     raise
             finally:
+                try:
+                    report['make_reconciliation'] = _make_reconciliation(report, primary)
+                except Exception as error:
+                    # A diagnostic failure must not leave a terminal process labelled running.
+                    report.update(status='stopped', declared_collection_complete=False,
+                        make_reconciliation=None, reconciliation_failure_type=type(error).__name__)
+                    report.setdefault('failure_type', type(error).__name__)
+                    report.setdefault('failure_reason', 'Make reconciliation failed; retained evidence requires review')
+                    try:
+                        budget.stop()
+                    except Exception as storage_error:
+                        report['budget_finalization_failure_type'] = type(storage_error).__name__
                 report['ended_at'] = utcnow().isoformat()
                 save()
                 fatal = any(e.get('outcome_kind') in {'access_failure','transport_failure','schema_failure',
@@ -346,13 +451,15 @@ def export_catalog(folder, *, output):
         raise ValueError('Collection is not terminal')
     if digest(folder/'selected_config.json') != report['config_sha256']:
         raise ValueError('Selected catalog configuration changed')
+    if report['planned_discovery_probes'] != _discovery_probes(json.loads((folder/'selected_config.json').read_text())):
+        raise ValueError('Catalog broad probe plan differs from selected configuration')
     budget = json.loads((folder/'catalog_budget.json').read_text())['budget']
     if budget['requests'] != report['requests'] or budget['pending_request']:
         raise ValueError('Unreconciled or uncertain durable request ledger')
     sources = {str(report_path): digest(report_path),
                str(folder/'selected_config.json'): digest(folder/'selected_config.json'),
                str(folder/'catalog_budget.json'): digest(folder/'catalog_budget.json')}
-    reports, frames, ledger = [], [], []
+    reports, frames, ledger, primary = [], [], [], {}
     if len({e['query']['query_id'] for e in report['entries']}) != len(report['entries']):
         raise ValueError('Duplicate catalog query IDs')
     leaves = {q['query_id'] for q in report['leaf_queries']}
@@ -378,9 +485,15 @@ def export_catalog(folder, *, output):
             if entry['role'] == 'discovery' and child.get('reported_total') is not None:
                 if native_makes(_facets(child)) != report['makes']:
                     raise ValueError('Catalog make scope differs from native source')
-            if entry['role'] == 'make_discovery' and child.get('reported_total') is not None:
+            if entry['role'] == 'make_discovery' and 'partition_reason' in entry:
                 make = q['filters']['makes'][0]['name']
-                children, _ = model_partitions(_facets(child), make, q['zip_code'], q['query_id'])
+                facets = _facets(child)
+                children, _ = model_partitions(facets, make, q['zip_code'], q['query_id'])
+                models = facets['facet_data']['makes'].get(make, {}).get('parentModels', [])
+                model_total = sum(model['count'] for model in models) if models else None
+                if (entry.get('native_model_count_sum') != model_total
+                        or entry.get('discovery_observed_at_utc') != facets['captured_at_utc']):
+                    raise ValueError('Catalog make discovery diagnostic changed')
                 derived_leaves.extend([q] if child['query_complete'] else children)
             # Reconcile the actual collector database, not only a fresh source import.
             database = path.parent/'vehicle.sqlite'
@@ -424,6 +537,7 @@ def export_catalog(folder, *, output):
             if row['query_id'] in leaves:
                 reports.append(path)
                 frames.append(observations.assign(query_id=row['query_id']))
+                primary[row['query_id']] = observations
             row['verified_rows'] = len(observations)
         ledger.append(row)
     if charged != budget['requests']:
@@ -434,14 +548,18 @@ def export_catalog(folder, *, output):
         raise ValueError('Catalog request spacing is below the declared minimum')
     if any(not aware(report['window_start']) <= stamp <= aware(report['window_end']) for stamp in starts+observed):
         raise ValueError('Catalog observation/request outside declared window')
-    for q in report.get('planned_make_probes', []):
+    for q, role in _planned_coverage(report):
         if q['query_id'] not in {row['query_id'] for row in ledger}:
-            ledger.append(dict(query_id=q['query_id'], role='make_discovery', status='unattempted', query_complete=False))
+            ledger.append(dict(query_id=q['query_id'], role=role, status='unattempted', query_complete=False))
+    make_reconciliation = _make_reconciliation(report, primary)
+    if make_reconciliation != report.get('make_reconciliation'):
+        raise ValueError('Catalog make reconciliation differs from retained sources')
     inventory = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame(columns=[*OBSERVATION_COLUMNS,'query_id'])
     output.mkdir(parents=True, exist_ok=False)
     if reports:
         import_reports(reports, output/'history.sqlite')
     pd.DataFrame(ledger).to_csv(output/'coverage.csv', index=False)
+    pd.DataFrame(make_reconciliation, columns=MAKE_RECONCILIATION_COLUMNS).to_csv(output/'make_reconciliation.csv', index=False)
     inventory.to_csv(output/'observations.csv', index=False)
     pd.DataFrame(report.get('geographic_checks', [])).to_json(output/'geographic_checks.json', orient='records', indent=2)
     write_json_atomic(output/'summary.json', report)

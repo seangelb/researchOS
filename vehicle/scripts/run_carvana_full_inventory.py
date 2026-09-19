@@ -33,12 +33,11 @@ def main(argv=None):
         parser.error('--live requires --config-sha256 from the reviewed preview')
     report = collect_catalog(args.config, expected_sha256=args.config_sha256)
     print(json.dumps({key:report.get(key) for key in ['capture_directory','status','requests',
-        'discovery_complete','primary_queries_complete','primary_observed_vins','primary_scope_reconciled',
+        'discovery_complete','primary_queries_complete','declared_collection_complete','primary_observed_vins','primary_scope_reconciled',
         'opening_count_residual','closing_count_residual','geographic_membership_stable','failure_type']}, indent=2))
     print('Reconciled export:', export_catalog(report['capture_directory'],
         output=Path(report['capture_directory'])/'analysis'))
-    return 0 if (report['status'] == 'collection_finished' and report.get('primary_scope_reconciled')
-                 and report.get('geographic_membership_stable')) else 1
+    return 0 if (report['status'] == 'collection_finished' and report.get('declared_collection_complete')) else 1
 
 
 if __name__ == '__main__':
