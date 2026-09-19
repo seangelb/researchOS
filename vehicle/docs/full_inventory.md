@@ -126,6 +126,9 @@ their original journals retained. Exports are new vintages, never overwrites.
 
 ## Historical interpretation
 
+The [September 19 retained-history publication](full_inventory_history_20260919.md)
+records the verified results, exclusions, review order and exact Notebook 25 inputs.
+
 The new per-run databases retain the same observation schema used by the old
 history system. Keep old operating, recovery and Tesla histories intact. Existing
 query-comparison gates require complete matching contexts before absence analysis;
