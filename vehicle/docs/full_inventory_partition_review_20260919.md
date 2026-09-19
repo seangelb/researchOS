@@ -1,5 +1,9 @@
 # Full-inventory pagination review: September 19, 2026
 
+Terminal follow-up: [the completed September 19 outcome](full_inventory_outcome_20260919.md)
+records all 25 gaps and the retained export. The checkpoint below is preserved
+as written while the original sweep was still running.
+
 The first all-year sweep started from the frozen `cb1924b` checkout. Its
 opening response reported 82,583 vehicles across 40 makes. It already contains
 an incomplete Audi A5 query, so it cannot qualify as the required complete

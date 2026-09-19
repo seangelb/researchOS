@@ -8,6 +8,9 @@ strategy. The original `carvana_full_inventory.json` preserves the first all-yea
 make/model strategy and its separate captures. The historical panel runner remains
 available for its frozen experiments. The new strategy is not live-validated yet.
 
+The [September 19 terminal outcome](full_inventory_outcome_20260919.md) records
+the original sweep's incomplete coverage, successful export and verified backup.
+
 ## Population and request sequence
 
 1. Read one broad all-year first-page response in ZIP 08542. Retain its native
