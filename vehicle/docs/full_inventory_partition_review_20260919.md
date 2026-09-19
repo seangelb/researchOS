@@ -29,6 +29,25 @@ SHA-256 `88f180f2b1b4340bc106554906e8197da5a76438f65476ccf3e44aa758f461f5`.
 Original response serialization and omitted fields are unavailable; selected
 public response fields, projections, journals and their hashes are retained.
 
+## Overlapping Chevrolet model categories
+
+At `2026-09-19T13:24:13.020271Z`, Chevrolet discovery reported 7,250 vehicles,
+while its 28 model groups summed to 7,252. Model ID 497 belongs to both Silverado
+3500 (count 40; IDs 242, 486, 497, 636, 665) and Silverado 3500 HD Chassis Cab
+(count 3; IDs 490, 497). Both groups also have exclusive IDs, so discarding either
+one would not preserve the complete declared category set.
+
+The difference of two is consistent with overlapping membership, but does not
+prove exactly two shared vehicles. The frozen collector consequently falls back
+to the full Chevrolet make. A future strategy must retain overlapping coverage
+explicitly or validate a grouped-model request; it cannot silently choose a
+disjoint subset. Smaller years alone do not establish that this overlap vanishes.
+
+The hash-bound `make_006` facet source is
+`420203ff8693855c4d16300ec8a7190578a1204a1ce2fd628ac6194e58080dda`.
+Its authoritative parent report and page journal are retained alongside the
+original capture. This finding changes future partition design, not this attempt.
+
 ## Next design to validate
 
 The user confirmed that access is limited to public website collection. A bulk
