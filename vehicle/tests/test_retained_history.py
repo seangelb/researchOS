@@ -366,3 +366,73 @@ def test_standalone_projection_requires_exact_parent_binding(tmp_path, response_
         assert rows.original_evidence_available_at.isna().all()
         assert rows.parent_report_path.eq(str(parent)).all()
         assert rows.purchase_pending.eq(False).all()
+
+
+@pytest.mark.parametrize('mutation', [None, 'undeclared', 'audit_hash', 'report_binding',
+    'database_binding', 'journal_binding', 'audit_journal', 'journal_identity',
+    'not_parsed', 'confirmed', 'complete', 'audit_parity', 'audit_count',
+    'snapshot_error', 'snapshot_row', 'wrong_witness'])
+def test_audited_post_storage_failure_keeps_both_error_states(tmp_path, response_data, mutation):
+    report, capture = query(tmp_path, response_data)
+    database = tmp_path/'snapshots.sqlite'
+    store_capture(database, run_id='query-one', page_number=1, raw_file=capture)
+    value = json.loads(report.read_text())
+    error = 'PermissionError: storage_failure'
+    value.update(status='blocked', query_complete=False, outcome_kind='storage_failure', reason=error)
+    page = value['pages'][0]
+    page.update(error=error, outcome_kind='storage_failure', database_outcome='unconfirmed')
+    if mutation == 'not_parsed':
+        page['status'] = 'failed'
+    elif mutation == 'confirmed':
+        page['database_outcome'] = 'confirmed'
+    elif mutation == 'complete':
+        value['query_complete'] = True
+    write(report, value)
+    journal_value = dict(run_id=value['run_id'], request=json.loads(capture.read_text())['request'], **page)
+    if mutation == 'journal_identity':
+        journal_value['run_id'] = 'wrong-run'
+    journal = write(tmp_path/'attempts/0001.json', journal_value)
+    if mutation in {'snapshot_error', 'snapshot_row'}:
+        with sqlite3.connect(database) as connection:
+            if mutation == 'snapshot_error':
+                connection.execute("UPDATE vehicle_captures SET error='unexpected'")
+            else:
+                connection.execute('UPDATE vehicle_observations SET asking_price_usd=1')
+    audit_value = dict(audited_at=LATER,
+        source_artifact_sha256={str(path): file_hash(path) for path in (report, database, journal)},
+        failures=[dict(query_id='first', journal_path=str(journal), journal=journal_value)],
+        query_reconciliation=[dict(query_id='first', original_status='blocked', query_complete=False,
+            verified_rows=3, attempted_requests=1, failed_requests=1, reason=error, source_sqlite_parity=True)])
+    if mutation in {'report_binding', 'database_binding', 'journal_binding'}:
+        target = {'report_binding': report, 'database_binding': database, 'journal_binding': journal}[mutation]
+        audit_value['source_artifact_sha256'][str(target)] = '0'*64
+    elif mutation == 'audit_journal':
+        audit_value['failures'][0]['journal'] = dict(journal_value, page=2)
+    elif mutation == 'audit_parity':
+        audit_value['query_reconciliation'][0]['source_sqlite_parity'] = False
+    elif mutation == 'audit_count':
+        audit_value['query_reconciliation'][0]['verified_rows'] = 4
+    audit = write(tmp_path/'audit.json', audit_value)
+    declaration = dict(path=str(audit), sha256=file_hash(audit),
+                       journal_path=str(journal), journal_sha256=file_hash(journal))
+    if mutation == 'audit_hash':
+        declaration['sha256'] = '0'*64
+    source = dict(report_path=str(report), report_sha256=file_hash(report),
+        database_witness=witness(database, 'history' if mutation == 'wrong_witness' else 'snapshots'))
+    if mutation != 'undeclared':
+        source['snapshot_reconciliation'] = declaration
+    selected = Path(publication(tmp_path, query_sources=[source], extras=[audit, journal])['path'])
+    if mutation:
+        with pytest.raises(ValueError):
+            read(selected, cutoff=LATER)
+    else:
+        assert read(selected).empty  # The later audit delays publication, not original evidence.
+        rows = read(selected, cutoff=LATER)
+        assert len(rows) == 3 and rows.source_query_complete.eq(0).all()
+        assert rows.original_evidence_available_at.isna().all()
+        alias = json.loads(rows.source_aliases_json.iloc[0])[0]
+        assert alias['original_report_error'] == error and alias['snapshot_capture_error'] is None
+        assert alias['original_database_outcome'] == 'unconfirmed'
+        assert alias['original_report_outcome_kind'] == 'storage_failure'
+        assert alias['reconciliation_sha256'] == file_hash(audit)
+        assert alias['journal_sha256'] == file_hash(journal)

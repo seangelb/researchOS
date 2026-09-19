@@ -123,6 +123,60 @@ def _equal(actual, expected, keys, label):
         raise ValueError('Database witness differs from retained ' + label) from exc
 
 
+def _snapshot_reconciliation(entry, inputs, report, sources):
+    """Bind one previously audited post-storage failure without reclassifying it."""
+    declaration = entry['snapshot_reconciliation']
+    witness = entry.get('database_witness') or {}
+    if witness.get('kind') != 'snapshots':
+        raise ValueError('Snapshot reconciliation requires a snapshot witness')
+    audit_path = _reference(declaration['path'], declaration['sha256'], inputs)
+    journal_path = _reference(declaration['journal_path'], declaration['journal_sha256'], inputs)
+    audit, journal = _json(audit_path), _json(journal_path)
+    bindings = {_path(path): digest for path, digest in audit['source_artifact_sha256'].items()}
+    for path, digest in ((entry['report_path'], entry['report_sha256']),
+                         (witness['path'], witness['sha256']),
+                         (journal_path, declaration['journal_sha256'])):
+        if bindings.get(_path(path)) != digest:
+            raise ValueError('Snapshot reconciliation audit does not bind current evidence')
+    failures = [failure for failure in audit['failures']
+                if _path(failure['journal_path']) == journal_path]
+    queries = [query for query in audit['query_reconciliation']
+               if query['query_id'] == report.get('query_id')]
+    pages = [page for page in report['pages'] if page.get('error')]
+    if (report.get('query_complete') is not False or report.get('status') != 'blocked'
+            or report.get('outcome_kind') != 'storage_failure'
+            or len(failures) != 1 or len(queries) != 1 or len(pages) != 1):
+        raise ValueError('Snapshot reconciliation requires one audited blocked storage failure')
+    page, query, failure = pages[0], queries[0], failures[0]
+    if (page.get('status') != 'parsed' or page.get('outcome_kind') != 'storage_failure'
+            or page.get('database_outcome') != 'unconfirmed' or not page.get('retained_source')
+            or not isinstance(page.get('error'), str) or not page['error']
+            or query.get('source_sqlite_parity') is not True
+            or query.get('query_complete') is not False or query.get('original_status') != 'blocked'
+            or query.get('verified_rows') != report['unique_listings']
+            or query.get('attempted_requests') != len(report['pages']) or query.get('failed_requests') != 1
+            or query.get('reason') != page['error'] or report.get('reason') != page['error']
+            or failure.get('query_id') != report.get('query_id')
+            or journal_path != _path(str(Path(entry['report_path']).parent/'attempts'/f"{page['page']:04d}.json"))):
+        raise ValueError('Snapshot reconciliation failure state differs')
+    matched = [source for source in sources if source['page'] == page['page']]
+    if len(matched) != 1:
+        raise ValueError('Snapshot reconciliation lacks a retained parsed page')
+    source = matched[0]
+    expected = dict(run_id=report['run_id'], request=source['capture']['request'], **page)
+    def canonical(value):
+        return json.dumps({key: _aware(item).isoformat() if key in CLOCK_FIELDS and item is not None
+                           else item for key, item in value.items()}, sort_keys=True)
+    if canonical(journal) != canonical(expected) or canonical(failure['journal']) != canonical(expected):
+        raise ValueError('Snapshot reconciliation journal differs from current failure')
+    source['snapshot_reconciliation'] = dict(
+        reconciliation_path=audit_path, reconciliation_sha256=declaration['sha256'],
+        journal_path=journal_path, journal_sha256=declaration['journal_sha256'],
+        original_report_error=page['error'], original_database_outcome=page['database_outcome'],
+        original_report_outcome_kind=page['outcome_kind'], snapshot_capture_error=None)
+    return [_aware(audit['audited_at'])]
+
+
 def _snapshot_witness(path, sources, *, run_id=None):
     captures, observations = read_snapshots(path)
     if run_id is not None:
@@ -150,7 +204,8 @@ def _snapshot_witness(path, sources, *, run_id=None):
                 page_number=source.get('page', stored.page_number),
                 observed_at_utc=capture.get('captured_at_utc'), source_url=capture.get('page_url'),
                 zip_code=capture.get('zip_code'), reported_total_text=capture.get('reported_total_text'),
-                status=source['status'], row_count=len(expected_rows), error=source.get('error'),
+                status=source['status'], row_count=len(expected_rows),
+                error=None if 'snapshot_reconciliation' in source else source.get('error'),
                 raw_file=source['source_path'], source_sha256=source['capture_id'], coverage='unverified')
             _equal(pd.DataFrame([stored]), pd.DataFrame([expected]), ['run_id', 'page_number'], 'capture')
             rows = (observations[observations.run_id.eq(stored.run_id)
@@ -166,7 +221,8 @@ def _snapshot_witness(path, sources, *, run_id=None):
             known.extend(clock for row in rows.to_dict('records') for clock in _clocks(row))
             aliases.append(dict(witness_path=path, witness_kind='snapshots',
                                 run_id=stored.run_id, page_number=int(stored.page_number),
-                                capture_id=source['capture_id']))
+                                capture_id=source['capture_id'],
+                                **source.get('snapshot_reconciliation', {})))
     if run_id is not None and not observations.empty:
         selected_rows = observations[observations.run_id.eq(run_id)]
         if len(selected_rows) != sum(item['row_count'] for item in sources):
@@ -228,6 +284,8 @@ def _query(entry, inputs):
             row_count=page['stored_rows'], error=page.get('error'),
             original=_original(page, capture)))
     run, captures, rows = read_query_evidence(path, diagnostic=diagnostic)
+    if 'snapshot_reconciliation' in entry:
+        clocks.extend(_snapshot_reconciliation(entry, inputs, report, sources))
     extra, aliases = _witness(entry, inputs, run=run, captures=captures, rows=rows, sources=sources)
     clocks.extend(extra)
     lookup = {source['capture_id']: source for source in sources}
@@ -358,6 +416,8 @@ def read_retained_history(manifest_path, *, expected_sha256, as_of):
         if not isinstance(entries, list):
             raise ValueError('Manifest source selections must be lists')
         for entry in entries:
+            if 'snapshot_reconciliation' in entry and reader is not _query:
+                raise ValueError('Snapshot reconciliation applies only to query sources')
             rows, metadata, clocks, witnesses = reader(entry, inputs)
             identity = metadata['source_group_id']
             if identity in groups:
