@@ -13,8 +13,9 @@ from vehicle_tracker.catalog import (_capture_roots, _capture_root_state, _requi
 from vehicle_tracker.catalog_partitions import plan_year_partitions
 from vehicle_tracker.cycles import CycleBudget, _cycle_state, aware, cycle_config, cycle_lock
 from vehicle_tracker.history import OBSERVATION_COLUMNS, import_reports, read_query_evidence
+from vehicle_tracker.gap_failure_review import reviewed_empty_layout
 from vehicle_tracker.retained_history import _snapshot_witness
-from vehicle_tracker.search import ENDPOINT, build_search_request, collect_search, search_transport
+from vehicle_tracker.search import ENDPOINT, _empty_first_page, build_search_request, collect_search, search_transport
 from vehicle_tracker.search_plan import validate_plan, verify_isolated_pagination
 from vehicle_tracker.storage import write_json_atomic
 
@@ -104,7 +105,7 @@ def settings(path):
 
 
 def validate_context(capture, facets, query):
-    """Require applied native year/make/model context even for empty tail responses."""
+    """Validate native context; a known empty response may leave make scope unknown."""
     request = build_search_request(filters=query['filters'], zip_code=query['zip_code'])
     if (not same(capture['request'], request) or not same(facets['request'], request)
             or capture['zip_code'] != query['zip_code'] or facets['zip_code'] != query['zip_code']
@@ -117,6 +118,11 @@ def validate_context(capture, facets, query):
         if ((key in bounds and (type(value) is not int or value != bounds[key]))
                 or (key not in bounds and value is not None)):
             raise ValueError('Recovery native applied year differs, including the open tail')
+    if facets['facet_data'].get('makes_present') is False:
+        if (facets['facet_data']['makes'] != {}
+                or not _empty_first_page(capture['pagination'], capture['vehicles'])):
+            raise ValueError('Unverified make context requires the exact empty first page')
+        return False
     requested = query['filters']['makes']
     if len(requested) != 1 or len(requested[0].get('parentModels', [])) > 1:
         raise ValueError('Recovery requires one original make or make/model parent')
@@ -189,11 +195,16 @@ def _reviewed_empty_failure(config):
 
 def _recovery_root_states(config):
     folder, _ = _reviewed_empty_failure(config)
+    folders, _ = reviewed_empty_layout(config)
+    if folder is not None:
+        folders.append(folder)
     states = [_capture_root_state(root) for root in _capture_roots(config)]
     for state in states:
-        if folder is not None and Path(state['capture_root']) == folder.parent:
+        folder = next((p for p in folders if Path(state['capture_root']) == p.parent), None)
+        if folder is not None:
             expected = [dict(capture_directory=str(folder), reason='Durable catalog budget remains stopped')]
-            if not state['access_stopped'] or state['unresolved_invocations'] != expected:
+            if (not state['access_stopped'] or state['unresolved_invocations'] != expected
+                    or {p for p in folder.parent.iterdir() if p.is_dir()} != {folder}):
                 raise ValueError('Reviewed peer has another or changed unresolved invocation')
             state.update(retained_access_stopped=True, reviewed_client_failure=str(folder),
                          access_stopped=False, unresolved_invocations=[], blocked=False)
@@ -254,7 +265,8 @@ def collect_recovery(config_path, *, expected_sha256, post=None):
             config_sha256=expected_sha256, plan_sha256=config['plan_sha256'], status='running',
             cycle_date=start['cycle_date'],
             started_at=utcnow().isoformat(), window_start=start['window_start'], window_end=start['window_end'],
-            entries=[dict(query=q, status='unattempted', query_complete=False, context_validated=False)
+            entries=[dict(query=q, status='unattempted', query_complete=False, context_validated=False,
+                          context_status='unattempted')
                      for q in plan['children']], requests=0, national_coverage_verified=False, estimated_sales=None,
             missing_or_noninteger_year_count=None,
             code_hashes={str(p): digest(p) for p in Path(__file__).parent.glob('*.py')})
@@ -277,11 +289,13 @@ def collect_recovery(config_path, *, expected_sha256, post=None):
                     child = folder/q['query_id']
                     result = collect_search(filters=q['filters'], zip_code=q['zip_code'], destination=child,
                         target_listings=None, budget=budget, post=send, known_listing_vins=known,
-                        retain_facets=True, first_page_validator=lambda capture, facets: validate_context(capture, facets, q))
+                        retain_facets=True, allow_empty_missing_makes=True,
+                        first_page_validator=lambda capture, facets: validate_context(capture, facets, q))
                     path = child/'run_report.json'
                     entry.update(status=result['status'], report=str(path), report_sha256=digest(path),
                         query_complete=result['query_complete'], requests=result['requests'],
                         context_validated=result.get('first_page_context_validated', False),
+                        context_status=result.get('first_page_context_status', 'unverified'),
                         outcome_kind=result.get('outcome_kind'))
                     if result.get('outcome_kind') == 'pagination_unstable':
                         verify_isolated_pagination(path, known_listing_vins=known, requests=budget.requests-before)
@@ -358,17 +372,25 @@ def _query_replay(entry, sources, *, window):
         evidence = page.get('response_evidence') or {}
         if evidence.get('source_path'):
             sources[evidence['source_path']] = evidence['source_sha256']
-    validated = False
+    validated, context_status = False, 'unverified'
     if report['pages'] and report['pages'][0].get('facet_source'):
         first = report['pages'][0]
+        from vehicle_tracker.facets import select_facets
+        from vehicle_tracker.search_evidence import verify_response_evidence
+        facet = load(first['facet_source'])
+        if not same(facet['facet_data'], select_facets(verify_response_evidence(first['response_evidence']),
+                                                      allow_empty_missing_makes=True)):
+            raise ValueError('Recovery facets differ from the retained public response')
         try:
-            validate_context(load(first['retained_source']), load(first['facet_source']), q)
-            validated = True
+            validated = validate_context(load(first['retained_source']), facet, q) is not False
+            context_status = 'validated' if validated else 'empty_make_context_unavailable'
         except ValueError:
             if first['status'] != 'failed' or first.get('outcome_kind') != 'schema_failure' or not rows.empty:
                 raise
     if (entry['context_validated'] is not validated
+            or entry['context_status'] != context_status
             or report.get('first_page_context_validated', False) is not validated
+            or report.get('first_page_context_status', 'unverified') != context_status
             or (not rows.empty and not validated)):
         raise ValueError('Recovery native context validation differs on replay')
     database = path.parent/'vehicle.sqlite'
@@ -421,6 +443,8 @@ def export_recovery(folder, *, output):
     sources = dict(plan['source_hashes'])
     _, review_sources = _reviewed_empty_failure(config)
     sources.update(review_sources)
+    _, layout_sources = reviewed_empty_layout(config)
+    sources.update(layout_sources)
     for name in ['catalog_report.json','catalog_budget.json','selected_config.json','selected_plan.json']:
         sources[str(folder/name)] = digest(folder/name)
     frames, ledger, reports, starts, responses = [], [], [], [], []
@@ -429,7 +453,7 @@ def export_recovery(folder, *, output):
     for entry in report['entries']:
         q = entry['query']
         row = dict(query_id=q['query_id'], parent_id=q['parent_id'], status=entry['status'],
-            context_validated=False, child_complete=False, observed_rows=0,
+            context_validated=False, context_status=entry['context_status'], child_complete=False, observed_rows=0,
             year_min=q['filters']['year'].get('min'), year_max=q['filters']['year'].get('max'))
         if entry['status'] == 'unattempted':
             if entry.get('report') or (folder/q['query_id']).exists():

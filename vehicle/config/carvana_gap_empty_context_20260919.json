@@ -1,0 +1,48 @@
+{
+  "format": "carvana-gap-recovery-v1",
+  "endpoint": "https://apik.carvana.io/merch/search/api/v2/search",
+  "primary_zip": "08542",
+  "location_filter": false,
+  "page_size": 24,
+  "sort": "MostPopular",
+  "minimum_spacing_seconds": 3,
+  "max_requests": 5997,
+  "max_seconds": 21600,
+  "timezone": "America/New_York",
+  "capture_root": "C:\\Users\\Sean\\VscProjects\\researchOS-gap-empty-context\\vehicle\\data\\experiments\\carvana_gap_empty_context",
+  "related_capture_roots": [
+    "C:\\Users\\Sean\\VscProjects\\researchOS\\vehicle\\data\\experiments\\carvana_full_inventory",
+    "C:\\Users\\Sean\\VscProjects\\researchOS\\vehicle\\data\\experiments\\carvana_full_inventory_years",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-full-inventory\\vehicle\\data\\experiments\\carvana_full_inventory",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-full-inventory\\vehicle\\data\\experiments\\carvana_full_inventory_years",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-catalog-partitioning\\vehicle\\data\\experiments\\carvana_full_inventory",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-catalog-partitioning\\vehicle\\data\\experiments\\carvana_full_inventory_years",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-gap-recovery\\vehicle\\data\\experiments\\carvana_full_inventory",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-gap-recovery\\vehicle\\data\\experiments\\carvana_full_inventory_years",
+    "C:\\Users\\Sean\\VscProjects\\researchOS\\vehicle\\data\\experiments\\carvana_gap_recovery",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-gap-recovery\\vehicle\\data\\experiments\\carvana_gap_recovery",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-empty-page-fix\\vehicle\\data\\experiments\\carvana_full_inventory",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-empty-page-fix\\vehicle\\data\\experiments\\carvana_full_inventory_years",
+    "C:\\Users\\Sean\\VscProjects\\researchOS\\vehicle\\data\\experiments\\carvana_gap_recovery_empty_fix",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-empty-page-fix\\vehicle\\data\\experiments\\carvana_gap_recovery_empty_fix",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-gap-diagnostic\\vehicle\\data\\experiments\\carvana_gap_facet_diagnostic",
+    "C:\\Users\\Sean\\VscProjects\\researchOS\\vehicle\\data\\experiments\\carvana_gap_facet_diagnostic",
+    "C:\\Users\\Sean\\VscProjects\\researchOS\\vehicle\\data\\experiments\\carvana_gap_empty_context",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-gap-empty-context\\vehicle\\data\\experiments\\carvana_full_inventory",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-gap-empty-context\\vehicle\\data\\experiments\\carvana_full_inventory_years"
+  ],
+  "plan_path": "C:\\Users\\Sean\\VscProjects\\researchOS-gap-recovery\\vehicle\\config\\carvana_gap_recovery_20260919_plan.json",
+  "plan_sha256": "f61adc9ae58aaa3beaea7910239a2247b922d0c9be05694c0daa4d948b67bd7c",
+  "authorization_basis": "User requested collection of the 25 query gaps and a working full-inventory script. Three separately retained HTTP200 zero-admission attempts consumed three requests. Independent source-bound review established the native empty pagination convention and that the diagnostic empty response omits make metadata. This fresh recovery preserves all 500 ordered year contexts and all prior stops; only recognized empty responses with matching year/ZIP may continue as explicitly unverified context, never complete coverage or absence/sales evidence. Nonzero rows still require validated native make/model/year context; all unexpected schema/access/transport/identity/storage failures stop. Remaining 5997 requests, original22:13:10.360920UTC deadline, no automatic retry/resume or budget extension.",
+  "authorized_cycle_date": "2026-09-19",
+  "absolute_window_end": "2026-09-19T22:13:10.360920+00:00",
+  "reviewed_empty_layout": {
+    "path": "C:\\Users\\Sean\\Documents\\ChatGPT\\ResearchOS\\carvana_full_inventory_20260919\\gap_missing_makes_diagnosis_20260919T164301753740Z.json",
+    "sha256": "f6fb8f50ff0333c96946e0cbf2fd376679e2d674a6e9c67d79db33853b9ae2a6",
+    "failures": [
+      "C:\\Users\\Sean\\VscProjects\\researchOS-gap-recovery\\vehicle\\data\\experiments\\carvana_gap_recovery\\2026-09-19",
+      "C:\\Users\\Sean\\VscProjects\\researchOS-empty-page-fix\\vehicle\\data\\experiments\\carvana_gap_recovery_empty_fix\\2026-09-19",
+      "C:\\Users\\Sean\\VscProjects\\researchOS-gap-diagnostic\\vehicle\\data\\experiments\\carvana_gap_facet_diagnostic\\2026-09-19"
+    ]
+  }
+}

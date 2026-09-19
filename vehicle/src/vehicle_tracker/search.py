@@ -31,6 +31,14 @@ def build_search_request(*, filters, zip_code, page=1, location_filter=False):
     return request
 
 
+def _empty_first_page(pagination, vehicles):
+    return (isinstance(pagination, dict) and isinstance(vehicles, list) and not vehicles
+            and all(type(pagination.get(key)) is int for key in
+                    ('currentPage', 'pageSize', 'totalMatchedInventory', 'totalMatchedPages'))
+            and pagination['currentPage'] == 1 and pagination['pageSize'] == 24
+            and pagination['totalMatchedInventory'] == 0 and pagination['totalMatchedPages'] in (0, 1))
+
+
 def _validate_pagination(pagination, request, vehicles):
     for key in ('currentPage', 'pageSize', 'totalMatchedInventory', 'totalMatchedPages'):
         if type(pagination[key]) is not int or pagination[key] < 0:
@@ -41,8 +49,7 @@ def _validate_pagination(pagination, request, vehicles):
         raise ValueError('Returned pagination differs from the requested page')
     total, pages = pagination['totalMatchedInventory'], pagination['totalMatchedPages']
     # Retain either native empty-first-page convention; never rewrite its count.
-    empty_first_page = (total == 0 and vehicles == [] and pagination['currentPage'] == 1
-                        and pagination['pageSize'] == 24 and pages in (0, 1))
+    empty_first_page = _empty_first_page(pagination, vehicles)
     if (pagination['pageSize'] != 24 or not isinstance(vehicles, list)
             or (total == 0 and not empty_first_page)
             or (total > 0 and pages != (total + 23) // 24)):
@@ -144,7 +151,7 @@ def search_transport(post=None):
 def collect_search(*, filters, zip_code, destination, target_listings=1000, budget=None, post=None,
                    location_filter=False, known_listing_ids=None, target_vins=None,
                    known_listing_vins=None, page_progress=None, retain_facets=False,
-                   first_page_validator=None):
+                   first_page_validator=None, allow_empty_missing_makes=False):
     """Collect one query into retained files, a page journal and a query database.
 
     A supplied budget is shared across queries; this function does not reset it.
@@ -152,18 +159,21 @@ def collect_search(*, filters, zip_code, destination, target_listings=1000, budg
     """
     if first_page_validator is not None and (not callable(first_page_validator) or not retain_facets):
         raise ValueError('First-page validation requires retained facets and a callable')
+    if (type(allow_empty_missing_makes) is not bool or (allow_empty_missing_makes
+            and (not retain_facets or not callable(first_page_validator)))):
+        raise ValueError('Unverified empty make context requires explicit facet retention and validation')
     with search_transport(post) as send:
         return _collect_search(filters=filters, zip_code=zip_code, destination=destination,
             target_listings=target_listings, budget=budget, post=send,
             location_filter=location_filter, known_listing_ids=known_listing_ids,
             target_vins=target_vins, known_listing_vins=known_listing_vins,
             page_progress=page_progress, retain_facets=retain_facets,
-            first_page_validator=first_page_validator)
+            first_page_validator=first_page_validator, allow_empty_missing_makes=allow_empty_missing_makes)
 
 
 def _collect_search(*, filters, zip_code, destination, target_listings, budget, post,
                     location_filter, known_listing_ids, target_vins, known_listing_vins,
-                    page_progress, retain_facets, first_page_validator):
+                    page_progress, retain_facets, first_page_validator, allow_empty_missing_makes):
     """Advance each page from reservation through retention to parsed storage.
 
     ``stage`` identifies the operation whose failure stopped collection. Keep the
@@ -282,7 +292,7 @@ def _collect_search(*, filters, zip_code, destination, target_listings, budget, 
                 from vehicle_tracker.facets import select_facets
                 selected = dict(request=request, captured_at_utc=stamp,
                     zip_code=capture['zip_code'], pagination=capture['pagination'],
-                    facet_data=select_facets(source))
+                    facet_data=select_facets(source, allow_empty_missing_makes=allow_empty_missing_makes))
                 stage = 'storage_failure'
                 facet_path = retain_capture(selected, destination/'facets')
                 entry.update(facet_source=str(facet_path),
@@ -295,8 +305,14 @@ def _collect_search(*, filters, zip_code, destination, target_listings, budget, 
             checkpoint(entry)  # Retention and the SQLite commit are separate steps.
             if number == 1 and first_page_validator is not None:
                 stage = 'schema_failure'
-                first_page_validator(capture, selected)
-                report['first_page_context_validated'] = True
+                validated = first_page_validator(capture, selected) is not False
+                if not validated and not (allow_empty_missing_makes
+                        and _empty_first_page(capture['pagination'], capture['vehicles'])
+                        and selected['facet_data'].get('makes_present') is False
+                        and selected['facet_data']['makes'] == {}):
+                    raise ValueError('Only the explicit missing-make empty response may remain unverified')
+                report['first_page_context_validated'] = validated
+                report['first_page_context_status'] = ('validated' if validated else 'empty_make_context_unavailable')
             stage = 'pagination_unstable'
             raw_ids = [v['vehicleId'] for v in capture['vehicles']]
             raw_vins = [v.get('vin') for v in capture['vehicles']]

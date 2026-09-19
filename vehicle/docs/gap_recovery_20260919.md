@@ -58,6 +58,22 @@ It does not resume the 500-query run or claim that an unverified empty result is
 complete coverage. The overall recovery has no reliable finish time until this
 live schema uncertainty is resolved.
 
+The one-request diagnostic established the actual omission: the native year
+metadata matched the requested older-year bound, but `facetData.makes` was absent.
+It returned HTTP 200, zero vehicles and one native page. The original response
+metadata is retained and replay reproduces the missing `makes` field; older
+responses' omitted facets remain unknown.
+
+The next recovery configuration, `carvana_gap_empty_context_20260919.json`, uses
+the remaining **5,997 requests** and the same original deadline. Its explicit
+gap-only parser option recognizes this empty layout, retains `makes_present:false`,
+and leaves its make/model context unverified. Such a child accepts no vehicle
+rows and does **not** count toward child or parent completeness. Independent
+year groups may continue. Populated responses still require native make, model,
+year and ZIP validation; unexpected schema or context failures still stop globally.
+Other facet/discovery consumers retain their strict behavior. All 25 parents and
+500 children, including unverified empty groups, remain in the denominator.
+
 ## Preview and inspect
 
 `vehicle/scripts/run_carvana_gap_recovery.py` previews the frozen plan without

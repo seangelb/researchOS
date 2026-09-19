@@ -99,14 +99,23 @@ def _public_number(value):
     raise ValueError('Unsupported public facet numeric representation')
 
 
-def select_facets(data):
+def select_facets(data, *, allow_empty_missing_makes=False):
     """Retain only observed public make/model/year fields; other fields stay omitted."""
     facets = data['facetData']
+    if type(allow_empty_missing_makes) is not bool:
+        raise ValueError('Empty make-context policy must be explicit boolean')
     result = dict(makes={}, year={})
     for key in ['min', 'max', 'appliedMin', 'appliedMax']:
         if key in facets['year']:
             value = facets['year'][key]
             result['year'][key] = _public_number(value)
+    if allow_empty_missing_makes and 'makes' not in facets:
+        from vehicle_tracker.search import _empty_first_page
+        inventory = data['inventory']
+        if not _empty_first_page(inventory['pagination'], inventory['vehicles']):
+            raise ValueError('Missing make facets are permitted only for an empty first page')
+        result['makes_present'] = False
+        return result
     for name, bucket in facets['makes'].items():
         _label(name)
         if type(bucket['isApplied']) is not bool or bucket['key'] != name:
