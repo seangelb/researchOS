@@ -56,9 +56,10 @@ records **10,384 files**, matching restored hashes, unchanged source bytes and
 establish disaster recovery or scientific completeness.
 
 The user requested a **separate targeted recovery of the 25 gaps using smaller
-year groups**. That recovery is under implementation; no successful recovery
-result exists yet. It must preserve this original incomplete outcome and record
-its own sources, scope and coverage. The broader year-first v2 strategy remains
+year groups**. The [recovery guide](gap_recovery_20260919.md) describes its fixed
+plan and review tables. A successful recovery has not yet been established.
+It preserves this original incomplete outcome and records its own sources,
+scope and coverage. The broader year-first v2 strategy remains
 **not live-validated**. Smaller partitions still need pagination and count
 reconciliation checks, and cannot resolve geographic coverage by themselves.
 Neither a later recovery nor native count movement establishes sales.

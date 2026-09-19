@@ -1,0 +1,28 @@
+{
+  "format": "carvana-gap-recovery-v1",
+  "endpoint": "https://apik.carvana.io/merch/search/api/v2/search",
+  "primary_zip": "08542",
+  "location_filter": false,
+  "page_size": 24,
+  "sort": "MostPopular",
+  "minimum_spacing_seconds": 3,
+  "max_requests": 6000,
+  "max_seconds": 21600,
+  "timezone": "America/New_York",
+  "capture_root": "C:\\Users\\Sean\\VscProjects\\researchOS-gap-recovery\\vehicle\\data\\experiments\\carvana_gap_recovery",
+  "related_capture_roots": [
+    "C:\\Users\\Sean\\VscProjects\\researchOS\\vehicle\\data\\experiments\\carvana_full_inventory",
+    "C:\\Users\\Sean\\VscProjects\\researchOS\\vehicle\\data\\experiments\\carvana_full_inventory_years",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-full-inventory\\vehicle\\data\\experiments\\carvana_full_inventory",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-full-inventory\\vehicle\\data\\experiments\\carvana_full_inventory_years",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-catalog-partitioning\\vehicle\\data\\experiments\\carvana_full_inventory",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-catalog-partitioning\\vehicle\\data\\experiments\\carvana_full_inventory_years",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-gap-recovery\\vehicle\\data\\experiments\\carvana_full_inventory",
+    "C:\\Users\\Sean\\VscProjects\\researchOS-gap-recovery\\vehicle\\data\\experiments\\carvana_full_inventory_years",
+    "C:\\Users\\Sean\\VscProjects\\researchOS\\vehicle\\data\\experiments\\carvana_gap_recovery"
+  ],
+  "plan_path": "C:\\Users\\Sean\\VscProjects\\researchOS-gap-recovery\\vehicle\\config\\carvana_gap_recovery_20260919_plan.json",
+  "plan_sha256": "f61adc9ae58aaa3beaea7910239a2247b922d0c9be05694c0daa4d948b67bd7c",
+  "authorization_basis": "User directly requested recovery of the 25 incomplete categories on September19, after the original process terminated. Separate fresh year-partitioned observations; no restart or rewriting of the original sweep. Existing expanded per-attempt ceiling retained; fatal stops, no retries, no budget extension.",
+  "authorized_cycle_date": "2026-09-19"
+}

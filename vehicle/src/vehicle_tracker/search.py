@@ -130,23 +130,27 @@ def search_transport(post=None):
 
 def collect_search(*, filters, zip_code, destination, target_listings=1000, budget=None, post=None,
                    location_filter=False, known_listing_ids=None, target_vins=None,
-                   known_listing_vins=None, page_progress=None, retain_facets=False):
+                   known_listing_vins=None, page_progress=None, retain_facets=False,
+                   first_page_validator=None):
     """Collect one query into retained files, a page journal and a query database.
 
     A supplied budget is shared across queries; this function does not reset it.
     Earlier-query identities measure overlap without discarding this query's rows.
     """
+    if first_page_validator is not None and (not callable(first_page_validator) or not retain_facets):
+        raise ValueError('First-page validation requires retained facets and a callable')
     with search_transport(post) as send:
         return _collect_search(filters=filters, zip_code=zip_code, destination=destination,
             target_listings=target_listings, budget=budget, post=send,
             location_filter=location_filter, known_listing_ids=known_listing_ids,
             target_vins=target_vins, known_listing_vins=known_listing_vins,
-            page_progress=page_progress, retain_facets=retain_facets)
+            page_progress=page_progress, retain_facets=retain_facets,
+            first_page_validator=first_page_validator)
 
 
 def _collect_search(*, filters, zip_code, destination, target_listings, budget, post,
                     location_filter, known_listing_ids, target_vins, known_listing_vins,
-                    page_progress, retain_facets):
+                    page_progress, retain_facets, first_page_validator):
     """Advance each page from reservation through retention to parsed storage.
 
     ``stage`` identifies the operation whose failure stopped collection. Keep the
@@ -278,6 +282,10 @@ def _collect_search(*, filters, zip_code, destination, target_listings, budget, 
                 source_hash_scope='SHA-256 of selected projection JSON bytes',
                 evidence_available_at_utc=datetime.now(timezone.utc).isoformat(), status='retained')
             checkpoint(entry)  # Retention and the SQLite commit are separate steps.
+            if number == 1 and first_page_validator is not None:
+                stage = 'schema_failure'
+                first_page_validator(capture, selected)
+                report['first_page_context_validated'] = True
             stage = 'pagination_unstable'
             raw_ids = [v['vehicleId'] for v in capture['vehicles']]
             raw_vins = [v.get('vin') for v in capture['vehicles']]
