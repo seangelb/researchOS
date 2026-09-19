@@ -6,6 +6,10 @@
 - The user's September 19 morning daily attempt also stopped on HTTP 403. Its
   [recorded outcome](docs/daily_outcome_20260919.md) consumes that day's attempt;
   the evening wake must not collect again. The global access stop remains active.
+- The separately scoped [September 19 access diagnosis](docs/access_diagnosis_20260919.md)
+  received HTTP 200 after the user disconnected their VPN. Its single-request
+  allowance is consumed. Preserve this result without treating it as a replacement
+  daily cycle or automatic clearance of the existing live-collection stop.
 - Start with Carvana; add other retailers only for a concrete research question and verified source.
 - Preserve retailer names, listing IDs, native statuses, source references, and observation timestamps.
 - VIN/vehicle identity does not merge listing histories across retailers. Include retailer in observation keys.
