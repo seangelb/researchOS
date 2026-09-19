@@ -130,7 +130,7 @@ def search_transport(post=None):
 
 def collect_search(*, filters, zip_code, destination, target_listings=1000, budget=None, post=None,
                    location_filter=False, known_listing_ids=None, target_vins=None,
-                   known_listing_vins=None, page_progress=None):
+                   known_listing_vins=None, page_progress=None, retain_facets=False):
     """Collect one query into retained files, a page journal and a query database.
 
     A supplied budget is shared across queries; this function does not reset it.
@@ -141,12 +141,12 @@ def collect_search(*, filters, zip_code, destination, target_listings=1000, budg
             target_listings=target_listings, budget=budget, post=send,
             location_filter=location_filter, known_listing_ids=known_listing_ids,
             target_vins=target_vins, known_listing_vins=known_listing_vins,
-            page_progress=page_progress)
+            page_progress=page_progress, retain_facets=retain_facets)
 
 
 def _collect_search(*, filters, zip_code, destination, target_listings, budget, post,
                     location_filter, known_listing_ids, target_vins, known_listing_vins,
-                    page_progress):
+                    page_progress, retain_facets):
     """Advance each page from reservation through retention to parsed storage.
 
     ``stage`` identifies the operation whose failure stopped collection. Keep the
@@ -260,6 +260,18 @@ def _collect_search(*, filters, zip_code, destination, target_listings, budget, 
             source = verify_response_evidence(evidence)
             capture = dict(project_response(source, request, observed_at=stamp),
                            attempt_id=entry['attempt_id'], response_evidence=evidence)
+            if retain_facets and number == 1:
+                # Discovery uses this same charged response, never a second probe.
+                from vehicle_tracker.facets import select_facets
+                from vehicle_tracker.search_evidence import unique_object
+                data = json.loads(response.content, object_pairs_hook=unique_object)
+                selected = dict(request=request, captured_at_utc=stamp,
+                    zip_code=capture['zip_code'], pagination=capture['pagination'],
+                    facet_data=select_facets(data))
+                stage = 'storage_failure'
+                facet_path = retain_capture(selected, destination/'facets')
+                entry.update(facet_source=str(facet_path),
+                    facet_sha256=hashlib.sha256(facet_path.read_bytes()).hexdigest())
             stage = 'storage_failure'
             capture_path = retain_capture(capture, destination/'raw')
             entry.update(retained_source=str(capture_path), source_sha256=hashlib.sha256(capture_path.read_bytes()).hexdigest(),

@@ -1,5 +1,12 @@
 # Vehicle research
 
+- The September 19 user-directed expansion is described in
+  [the full-inventory goal](docs/full_inventory_goal.md) and
+  [operating guide](docs/full_inventory.md). Its separate config allows at most
+  6,000 requests/six hours with the same three-second spacing and fatal stops.
+  Do not substitute this scope into the frozen 101-query trial or status study.
+  Software/configuration updates alone do not establish a live baseline.
+
 - Live Carvana access is stopped after HTTP 403 on September 18, 2026. Read
   [the retained outcome](docs/facet_outcome_20260918.md) before any daily or browser
   collection. Scheduled wakes do not clear this stop; continue offline audits only.

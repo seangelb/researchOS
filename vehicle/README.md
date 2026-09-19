@@ -31,6 +31,12 @@ Normal **Restart Kernel and Run All is offline and read-only**. Notebook 11
 defines a live function but does not call it by default. Routine analysis starts
 in 20 and 24; 30 is for quarterly assumptions and forecast review.
 
+The expanded [full-inventory workflow](docs/full_inventory.md) discovers all current
+make/model categories with a separate 6,000-request/six-hour ceiling. Start with
+Notebook 25 to review its saved collection and coverage reports. The
+[revised goal](docs/full_inventory_goal.md) records the baseline, historical
+comparison and sales-validation requirements that remain to be demonstrated.
+
 Use the [review and operating guide](docs/status_experiment.md) for exact
 settings, commands, separate collection authorization, recovery and export
 instructions. The code walkthrough explains how the pieces work; that guide
