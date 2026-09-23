@@ -23,7 +23,7 @@ the original sweep's incomplete coverage, successful export and verified backup.
    requested native applied bounds. Positive year pages expose make counts summing
    to the page total. An empty year/tail page may omit `facetData.makes`; that
    layout is retained as a validated empty year without inventing zero make
-   categories.
+   categories. Empty inventory may report native `totalMatchedPages` 0 or 1.
 3. Probe each positive make/year cell. Reuse a complete single-page make probe;
    otherwise split into model families only when native counts and IDs form a
    partition. Keep the whole make/year context when they do not. Positive tails

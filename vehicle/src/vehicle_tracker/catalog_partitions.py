@@ -39,10 +39,13 @@ def _context(capture, filters, zip_code):
             or capture['zip_code'] != zip_code):
         raise ValueError('Year-discovery request or returned ZIP differs from the selected context')
     page = capture['pagination']
+    total, pages = page['totalMatchedInventory'], page['totalMatchedPages']
+    # Match search.empty first-page rules: total 0 may report 0 or 1 native pages.
     if (any(type(page[key]) is not int or page[key] < 0 for key in
             ['currentPage', 'pageSize', 'totalMatchedInventory', 'totalMatchedPages'])
             or page['currentPage'] != 1 or page['pageSize'] != 24
-            or page['totalMatchedPages'] != (page['totalMatchedInventory']+23)//24):
+            or (total == 0 and pages not in (0, 1))
+            or (total > 0 and pages != (total + 23) // 24)):
         raise ValueError('Year discovery requires consistent native first-page pagination')
     bounds = filters.get('year', {})
     year = capture['facet_data']['year']

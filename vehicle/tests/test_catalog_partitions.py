@@ -88,11 +88,23 @@ def test_empty_year_omitted_makes_validates_without_invented_zero_categories(tmp
     part = plan['partitions'][0]
     data = capture(part['filters'], {})
     data['facet_data'] = dict(year=data['facet_data']['year'], makes={}, makes_present=False)
+    # Live empty tails report one native page with zero inventory.
+    data['pagination']['totalMatchedPages'] = 1
     path, sha = retain(tmp_path, data)
     result = year_make_candidates(path, expected_sha256=sha, partition=part)
     assert result['reported_total'] == 0
     assert result['candidates'] == result['native_zero_categories'] == []
     assert result['retained_context_validated'] and result['mandatory_tail_year_context'] is None
+
+
+@pytest.mark.parametrize('pages', [0, 1])
+def test_empty_year_accepts_either_native_empty_page_count(tmp_path, plan, pages):
+    part = plan['partitions'][1]
+    data = capture(part['filters'], {'Audi': 0, 'Tesla': 0})
+    data['pagination']['totalMatchedPages'] = pages
+    path, sha = retain(tmp_path, data)
+    result = year_make_candidates(path, expected_sha256=sha, partition=part)
+    assert result['reported_total'] == 0 and len(result['native_zero_categories']) == 2
 
 
 @pytest.mark.parametrize('problem', ['nonzero', 'nonempty_makes'])

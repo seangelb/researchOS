@@ -7,14 +7,19 @@ older-year tail (`year` max 2009) returned zero vehicles and one native page, wi
 raised `KeyError` on `makes`, recorded as `schema_failure`, and wrote
 `access_stop.json`.
 
-This matches the empty layout already established in
-[gap recovery](gap_recovery_20260919.md). Year-first discovery now admits that
-exact empty layout for year-only probes, retains `makes_present:false`, and
-treats the year context as a validated empty total without inventing zero make
-categories. Positive year pages still require make counts that sum to the total.
-Make/model inventory probes keep the stricter default.
+A corrected attempt then collected that empty tail successfully (`makes_present:
+false`, total 0, `totalMatchedPages` 1) but stopped when year-candidate validation
+still required `(total+23)//24` pages. Empty inventory may natively report 0 or 1
+pages; year discovery now matches the search empty-page contract.
 
-The failed attempt bytes were moved to
-`vehicle/data/experiments/retained_schema_failures/carvana_full_inventory_years_20260923_empty_makes/`
-so today's corrected attempt can use a fresh destination under the ordinary
-capture root. The stop was a client schema bug, not an HTTP access failure.
+This matches the empty layout already established in
+[gap recovery](gap_recovery_20260919.md). Year-first discovery admits that exact
+empty layout for year-only probes, retains `makes_present:false`, accepts either
+empty page count, and treats the year context as a validated empty total without
+inventing zero make categories. Positive year pages still require make counts that
+sum to the total. Make/model inventory probes keep the stricter default.
+
+Failed attempt bytes were moved under
+`vehicle/data/experiments/retained_schema_failures/` so today's corrected attempt
+can use a fresh destination under the ordinary capture root. These stops were
+client schema bugs, not HTTP access failures.
