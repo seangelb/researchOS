@@ -183,6 +183,56 @@ def test_empty_year_is_validated_zero_without_invented_make_or_leaf_queries(year
             if zero['year_query_id'] == 'year_2011'} == {('Audi', 0), ('Tesla', 0)}
 
 
+def test_empty_year_tail_omitted_makes_continues_without_invented_categories(year_experiment):
+    """Live empty tails omit facetData.makes; do not invent zero make rows or stop."""
+    e = year_experiment
+    e.vehicles[:] = [vehicle for vehicle in e.vehicles if vehicle['year'] >= 2010]
+    original = e.send
+
+    def send(url, **kwargs):
+        response = original(url, **kwargs)
+        request = kwargs['json']
+        if request['filters'].get('year') == {'max': 2009} and 'makes' not in request['filters']:
+            data = json.loads(response.content)
+            del data['facetData']['makes']
+            response.content = json.dumps(data).encode()
+        return response
+
+    report = run(e, send)
+    assert report['status'] == 'collection_finished' and report['primary_queries_complete']
+    assert report['year_tail_counts']['lower_tail'] == 0
+    lower = next(item for item in report['year_discoveries']
+                 if item['partition']['query_id'] == 'year_lower_tail')
+    assert lower['reported_total'] == 0
+    assert lower['candidates'] == lower['native_zero_categories'] == []
+    entry = next(item for item in report['entries'] if item['query']['query_id'] == 'year_lower_tail')
+    assert entry['year_context_validated'] and entry['context_status'] == 'validated'
+    assert entry['query_complete'] and entry['reported_total'] == 0
+    assert not any(q['query_id'].startswith('year_lower_tail') for q in report['planned_make_probes'])
+    assert not (e.folder.parent / 'access_stop.json').exists()
+
+
+def test_nonzero_year_page_cannot_omit_make_facets(year_experiment):
+    e = year_experiment
+    original = e.send
+
+    def send(url, **kwargs):
+        response = original(url, **kwargs)
+        request = kwargs['json']
+        if request['filters'].get('year') == {'max': 2009} and 'makes' not in request['filters']:
+            data = json.loads(response.content)
+            del data['facetData']['makes']
+            response.content = json.dumps(data).encode()
+        return response
+
+    result = run(e, send)
+    assert result['status'] == 'stopped' and (e.folder.parent / 'access_stop.json').is_file()
+    failed = next(item for item in result['entries'] if item['query']['query_id'] == 'year_lower_tail')
+    assert failed['outcome_kind'] == 'schema_failure'
+    assert not failed.get('year_context_validated')
+    assert result['year_discoveries'] == []
+
+
 @pytest.mark.parametrize('problem', ['missing', 'extra', 'wrong', 'boolean'])
 @pytest.mark.parametrize('stage', ['year_only', 'make_year'])
 def test_applied_year_bounds_fail_globally_before_later_work(year_experiment, problem, stage):

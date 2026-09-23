@@ -39,10 +39,13 @@ def _context(capture, filters, zip_code):
             or capture['zip_code'] != zip_code):
         raise ValueError('Year-discovery request or returned ZIP differs from the selected context')
     page = capture['pagination']
+    total, pages = page['totalMatchedInventory'], page['totalMatchedPages']
+    # Match search.empty first-page rules: total 0 may report 0 or 1 native pages.
     if (any(type(page[key]) is not int or page[key] < 0 for key in
             ['currentPage', 'pageSize', 'totalMatchedInventory', 'totalMatchedPages'])
             or page['currentPage'] != 1 or page['pageSize'] != 24
-            or page['totalMatchedPages'] != (page['totalMatchedInventory']+23)//24):
+            or (total == 0 and pages not in (0, 1))
+            or (total > 0 and pages != (total + 23) // 24)):
         raise ValueError('Year discovery requires consistent native first-page pagination')
     bounds = filters.get('year', {})
     year = capture['facet_data']['year']
@@ -56,7 +59,14 @@ def _context(capture, filters, zip_code):
         if ((key in bounds and (type(value) is not int or value != bounds[key]))
                 or (key not in bounds and value is not None)):
             raise ValueError('Native applied year bounds differ from the request')
-    makes = capture['facet_data']['makes']
+    facets = capture['facet_data']
+    makes = facets.get('makes')
+    # Live empty year/tail pages may omit make facets entirely; retain that shape
+    # without inventing zero categories. Positive pages still require make counts.
+    if facets.get('makes_present') is False:
+        if makes != {} or page['totalMatchedInventory'] != 0:
+            raise ValueError('Omitted make facets are valid only for empty year-only inventory')
+        return 0
     if not isinstance(makes, dict):
         raise ValueError('Native make facets must be a mapping')
     for name, bucket in makes.items():
