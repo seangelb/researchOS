@@ -84,6 +84,33 @@ def test_empty_year_keeps_native_zeros_without_manufacturing_inventory(tmp_path,
     assert result['partition']['mandatory'] and not result['inventory_coverage_complete']
 
 
+def test_empty_year_omitted_makes_validates_without_invented_zero_categories(tmp_path, plan):
+    part = plan['partitions'][0]
+    data = capture(part['filters'], {})
+    data['facet_data'] = dict(year=data['facet_data']['year'], makes={}, makes_present=False)
+    path, sha = retain(tmp_path, data)
+    result = year_make_candidates(path, expected_sha256=sha, partition=part)
+    assert result['reported_total'] == 0
+    assert result['candidates'] == result['native_zero_categories'] == []
+    assert result['retained_context_validated'] and result['mandatory_tail_year_context'] is None
+
+
+@pytest.mark.parametrize('problem', ['nonzero', 'nonempty_makes'])
+def test_omitted_makes_rejected_unless_exact_empty_year_layout(tmp_path, plan, problem):
+    part = plan['partitions'][0]
+    data = capture(part['filters'], {'Audi': 0})
+    data['facet_data']['makes_present'] = False
+    if problem == 'nonzero':
+        data['facet_data']['makes'] = {}
+        data['pagination'] = dict(currentPage=1, pageSize=24, totalMatchedInventory=1, totalMatchedPages=1)
+    else:
+        # makes_present=false cannot coexist with an explicit make mapping.
+        data['facet_data']['makes'] = {'Audi': dict(key='Audi', count=0, isApplied=False, parentModels=[])}
+    path, sha = retain(tmp_path, data)
+    with pytest.raises(ValueError, match='Omitted make facets'):
+        year_make_candidates(path, expected_sha256=sha, partition=part)
+
+
 @pytest.mark.parametrize('problem', ['zip', 'returned_zip', 'page', 'returned_page', 'size', 'sort',
     'location', 'extra_filter', 'missing_bound', 'extra_bound', 'wrong_bound', 'bool_bound',
     'negative_count', 'bool_count', 'float_count', 'make_applied', 'make_key', 'model_applied',

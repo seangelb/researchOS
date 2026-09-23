@@ -56,7 +56,14 @@ def _context(capture, filters, zip_code):
         if ((key in bounds and (type(value) is not int or value != bounds[key]))
                 or (key not in bounds and value is not None)):
             raise ValueError('Native applied year bounds differ from the request')
-    makes = capture['facet_data']['makes']
+    facets = capture['facet_data']
+    makes = facets.get('makes')
+    # Live empty year/tail pages may omit make facets entirely; retain that shape
+    # without inventing zero categories. Positive pages still require make counts.
+    if facets.get('makes_present') is False:
+        if makes != {} or page['totalMatchedInventory'] != 0:
+            raise ValueError('Omitted make facets are valid only for empty year-only inventory')
+        return 0
     if not isinstance(makes, dict):
         raise ValueError('Native make facets must be a mapping')
     for name, bucket in makes.items():

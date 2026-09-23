@@ -19,7 +19,7 @@ import pandas as pd
 from vehicle_tracker.cycles import CycleBudget, aware, cycle_config, cycle_lock
 from vehicle_tracker.carvana import NATIVE_FIELDS
 from vehicle_tracker.history import OBSERVATION_COLUMNS, import_reports, read_query_evidence
-from vehicle_tracker.search import ENDPOINT, collect_search, search_transport
+from vehicle_tracker.search import ENDPOINT, _empty_first_page, build_search_request, collect_search, search_transport
 from vehicle_tracker.search_plan import verify_isolated_pagination
 from vehicle_tracker.storage import read_snapshots, write_json_atomic
 from vehicle_tracker.catalog_partitions import plan_year_partitions, year_make_candidates
@@ -327,6 +327,27 @@ def _validate_year_children(children, parent):
         raise ValueError('Year partition child clips or changes its mandatory year context')
 
 
+def _validate_year_discovery_page(capture, facets, query):
+    """Admit year-only discovery; empty pages may omit make facets without inventing them."""
+    request = build_search_request(filters=query['filters'], zip_code=query['zip_code'])
+    if (capture['request'] != request or facets['request'] != request
+            or capture['zip_code'] != query['zip_code'] or facets['zip_code'] != query['zip_code']
+            or facets['captured_at_utc'] != capture['captured_at_utc']
+            or facets['pagination'] != capture['pagination']):
+        raise ValueError('Year discovery first-page source context differs')
+    bounds, year = query['filters']['year'], facets['facet_data']['year']
+    for key, native in [('min', 'appliedMin'), ('max', 'appliedMax')]:
+        value = year.get(native)
+        if ((key in bounds and (type(value) is not int or value != bounds[key]))
+                or (key not in bounds and value is not None)):
+            raise ValueError('Year discovery native applied year differs')
+    if facets['facet_data'].get('makes_present') is False:
+        if (facets['facet_data']['makes'] != {}
+                or not _empty_first_page(capture['pagination'], capture['vehicles'])):
+            raise ValueError('Omitted make facets require an empty year-only first page')
+    return True
+
+
 def _year_reconciliation(report, primary):
     """Count evidence per frozen year context, including both unbounded tails."""
     entries = {entry['query']['query_id']: entry for entry in report['entries']}
@@ -435,13 +456,22 @@ def collect_catalog(config_path, *, expected_sha256, post=None):
             budget.timeout_ms()
             before = budget.requests
             child = folder/q['query_id']
+            # Year-only discovery shares the live empty layout that omits make facets.
+            # Make/model probes and inventory pages keep the stricter default.
+            year_only = role == 'year_discovery'
             result = collect_search(filters=q['filters'], zip_code=q['zip_code'], destination=child,
                 target_listings=1 if probe else None, budget=budget, post=send,
-                known_listing_vins=known, retain_facets=probe)
+                known_listing_vins=known, retain_facets=probe,
+                allow_empty_missing_makes=year_only,
+                first_page_validator=((lambda capture, facets, selected=q:
+                    _validate_year_discovery_page(capture, facets, selected)) if year_only else None))
             entry.update(status=result['status'], report=str(child/'run_report.json'),
                 report_sha256=digest(child/'run_report.json'), query_complete=result['query_complete'],
                 reported_total=result['reported_total'], requests=result['requests'],
                 outcome_kind=result.get('outcome_kind'))
+            if year_only:
+                entry.update(context_validated=result.get('first_page_context_validated', False),
+                    context_status=result.get('first_page_context_status', 'unverified'))
             if result.get('outcome_kind') == 'pagination_unstable':
                 verify_isolated_pagination(child/'run_report.json', known_listing_vins=known,
                     requests=budget.requests-before)

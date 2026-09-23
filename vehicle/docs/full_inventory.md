@@ -20,7 +20,10 @@ the original sweep's incomplete coverage, successful export and verified backup.
    an older-year tail and a newer-year tail. These cover integer years without
    treating the displayed endpoints as universe bounds. Missing/noninteger years
    remain an explicit uncertainty. Every future year-only response must match its
-   requested native applied bounds and expose make counts summing to its total.
+   requested native applied bounds. Positive year pages expose make counts summing
+   to the page total. An empty year/tail page may omit `facetData.makes`; that
+   layout is retained as a validated empty year without inventing zero make
+   categories.
 3. Probe each positive make/year cell. Reuse a complete single-page make probe;
    otherwise split into model families only when native counts and IDs form a
    partition. Keep the whole make/year context when they do not. Positive tails
