@@ -297,6 +297,18 @@ def _validate_outcomes(outcomes, plan, *, as_of):
         raise ValueError('Rescore outcomes at the requested hypothesis cutoff')
 
 
+def wilson_resolved_interval(sold, resolved):
+    """95% Wilson interval for sold/resolved. Missing when nothing resolved."""
+    if not resolved:
+        return None, None
+    fraction = sold / resolved
+    z = 1.959963984540054
+    center = (fraction + z * z / (2 * resolved)) / (1 + z * z / resolved)
+    half = z * sqrt(fraction * (1 - fraction) / resolved + z * z / (4 * resolved ** 2)) / (
+        1 + z * z / resolved)
+    return max(0.0, center - half), min(1.0, center + half)
+
+
 def arm_outcomes(outcomes, plan, *, as_of, wave='primary'):
     """Distinct-VIN counts, conditional Wilson intervals and full-sample bounds.
 
@@ -319,12 +331,7 @@ def arm_outcomes(outcomes, plan, *, as_of, wave='primary'):
         resolved = sold + available
         unresolved = selected - resolved
         fraction = sold/resolved if resolved else None
-        low, high = None, None
-        if resolved:
-            z = 1.959963984540054
-            center = (fraction+z*z/(2*resolved))/(1+z*z/resolved)
-            half = z*sqrt(fraction*(1-fraction)/resolved+z*z/(4*resolved**2))/(1+z*z/resolved)
-            low, high = max(0.0, center-half), min(1.0, center+half)
+        low, high = wilson_resolved_interval(sold, resolved)
         rows.append(dict(wave=wave, arm=arm, selected=selected,
             attempted=int(group[wave+'_attempts'].gt(0).sum()),
             identity_matched=int(group[wave+'_identity_matched'].sum()), sold=sold, available=available,

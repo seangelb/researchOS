@@ -51,7 +51,35 @@ def _change(before, after):
     return pd.NA if pd.isna(before) or pd.isna(after) else bool(before != after)
 
 
-def vin_events(cycles, observations, *, absence_days=3):
+def _cells_for_cycle(unassessable_cells, cycle_id):
+    if unassessable_cells is None:
+        return ()
+    if not isinstance(unassessable_cells, dict):
+        raise ValueError('unassessable_cells must map cycle_id to year/make cells')
+    cells = unassessable_cells.get(cycle_id) or ()
+    return tuple(cells)
+
+
+def observation_in_unverified_cell(row, cells):
+    """True when the last known year/make falls in an unverified cell."""
+    if not cells:
+        return False
+    make, year = row.get('make'), row.get('year')
+    for cell in cells:
+        if cell.get('make') != make:
+            continue
+        if pd.isna(year):
+            return True
+        low, high = cell.get('year_min'), cell.get('year_max')
+        if low is not None and year < low:
+            continue
+        if high is not None and year > high:
+            continue
+        return True
+    return False
+
+
+def vin_events(cycles, observations, *, absence_days=3, unassessable_cells=None):
     """One row per known retailer/VIN per cycle, ordered by day then identity.
 
     Observation fields on absent rows retain the last presence evidence; check
@@ -60,7 +88,10 @@ def vin_events(cycles, observations, *, absence_days=3):
     A persistent-absence event occurs once
     per absence episode when a consecutive complete-day threshold is reached.
     Gaps/partial days reset the streak, and timing uncertainty survives until return.
-    Availability is the latest supporting cycle availability, never a backdated sale.
+    Optional unassessable_cells maps cycle_id to unverified year/make cells; those
+    cars are absence_unassessable that day, with the streak reset. With no argument,
+    results are unchanged. Availability is the latest supporting cycle availability,
+    never a backdated sale.
     """
     if type(absence_days) is not int or absence_days < 1:
         raise ValueError('absence_days must be a positive integer')
@@ -135,10 +166,12 @@ def vin_events(cycles, observations, *, absence_days=3):
                 state = dict(last=current, first=state['first'] if state else cycle['cycle_id'],
                              streak=0, absent=False, persistent=False, uncertain=False)
             else:
+                blocked_cell = observation_in_unverified_cell(before, _cells_for_cycle(
+                    unassessable_cells, cycle['cycle_id']))
                 if gap or (previous_cycle and not previous_cycle['coverage_complete']):
                     state['streak'] = 0
-                state['uncertain'] = uncertain or not cycle['coverage_complete']
-                if not cycle['coverage_complete']:
+                state['uncertain'] = uncertain or not cycle['coverage_complete'] or blocked_cell
+                if not cycle['coverage_complete'] or blocked_cell:
                     event, state['streak'] = 'absence_unassessable', 0
                 else:
                     state['streak'] += 1

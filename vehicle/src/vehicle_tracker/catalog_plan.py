@@ -257,25 +257,26 @@ def adaptive_cell(bucket, *, make, query_id, year_bounds, zip_code, threshold):
         leaf = whole if kind == 'whole' else query(query_id + '_all', zip_code, filters)
         return dict(kind=kind, probe=None if kind == 'whole' else whole, leaves=[leaf] if kind == 'whole' else [],
                     fallback=leaf, requests=(page_count(count) if kind == 'whole' else 1 + page_count(count)),
-                    native_count=count, make=make, query_id=query_id)
+                    native_count=count, make=make, query_id=query_id, overlap=None)
     ordered = sorted(children, key=lambda child: child['key'])
     leaves = [query(f'{query_id}_model_{i:03d}', zip_code, dict(
         filters, makes=[{'name': make, 'parentModels': [{'name': child['key']}]}]))
         for i, child in enumerate(ordered)]
     ids = [value for child in ordered for value in child['modelIds']]
     if len(ids) == len(set(ids)) and sum(child['count'] for child in ordered) == count:
-        reason = 'native model partition'
+        reason, overlap = 'native model partition', None
     else:
         overlap = _model_id_overlap(ordered, count)
         if overlap is None:
             leaf = query(query_id + '_all', zip_code, filters)
             return dict(kind='whole', probe=whole, leaves=[leaf], fallback=leaf,
                         requests=1 + page_count(count), native_count=count, make=make,
-                        query_id=query_id, reason='model counts do not partition; collect whole make')
-        reason = 'overlapping model ids'
+                        query_id=query_id, reason='model counts do not partition; collect whole make',
+                        overlap=None)
+        reason = 'overlapping model ids; each model collected'
     return dict(kind='split', probe=whole, leaves=leaves, fallback=None,
                 requests=1 + sum(page_count(child['count']) for child in ordered),
-                native_count=count, make=make, query_id=query_id, reason=reason)
+                native_count=count, make=make, query_id=query_id, reason=reason, overlap=overlap)
 
 
 def adaptive_cells_from_capture(capture, partition, *, threshold):

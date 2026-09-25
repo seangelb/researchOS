@@ -22,6 +22,89 @@ def _json(path):
     return json.loads(Path(path).read_text(encoding='utf-8'))
 
 
+def catalog_population_scope(config, report):
+    """Stable v3 population identity. Daily leaf plans are not part of the scope."""
+    if report.get('format') == 'carvana-full-inventory-run-v3':
+        return dict(endpoint=ENDPOINT, primary_zip=config['primary_zip'], location_filter=False,
+                    sort='MostPopular', partition_strategy='year_make_adaptive')
+    return dict(endpoint=ENDPOINT, primary_zip=config['primary_zip'], location_filter=False,
+                sort='MostPopular', declared_leaves=report['leaf_queries'])
+
+
+def leaf_plan_digest(leaves):
+    return hashlib.sha256(json.dumps(leaves, sort_keys=True).encode()).hexdigest()
+
+
+def _cell_from_query(query):
+    filters = query.get('filters') or {}
+    year = filters.get('year') or {}
+    makes = filters.get('makes') or [{}]
+    return dict(year_min=year.get('min'), year_max=year.get('max'), make=makes[0].get('name'))
+
+
+def unverified_cells_from_report(report):
+    """Year/make cells whose latest union did not match the native total."""
+    union = {row['query_id']: row for row in report.get('leaf_union') or []}
+    cells = []
+    seen = set()
+    for leaf in report.get('leaf_queries') or []:
+        row = union.get(leaf['query_id'])
+        complete = bool(row.get('complete_by_union')) if row else False
+        if complete:
+            continue
+        cell = _cell_from_query(leaf)
+        key = (cell['year_min'], cell['year_max'], cell['make'])
+        if key in seen or cell['make'] is None:
+            continue
+        seen.add(key)
+        cells.append(cell)
+    return cells
+
+
+def collapse_same_day_memberships(rows):
+    """One retailer/VIN per cycle. Shared listing IDs keep the earliest row."""
+    if rows.empty:
+        return rows
+    required = {'cycle_id', 'retailer', 'vin', 'listing_id', 'observed_at_utc'}
+    if required - set(rows.columns):
+        raise ValueError('Same-day membership collapse requires cycle, VIN, listing and clock')
+    conflict = rows.groupby(['cycle_id', 'retailer', 'vin'], dropna=False)['listing_id'].nunique()
+    if conflict.gt(1).any():
+        raise ValueError('Conflicting VIN/listing identities require explicit review')
+    ordered = rows.sort_values(['observed_at_utc', 'listing_id'], kind='stable')
+    chosen, aliased = [], False
+    for _, group in ordered.groupby(['cycle_id', 'retailer', 'vin'], sort=False, dropna=False):
+        row = group.iloc[0].to_dict()
+        if len(group) > 1:
+            extras = []
+            for item in group.itertuples():
+                clock = item.observed_at_utc
+                extras.append(dict(query_id=getattr(item, 'query_id', None),
+                                   run_id=getattr(item, 'run_id', None),
+                                   observed_at_utc=clock.isoformat() if hasattr(clock, 'isoformat') else clock))
+            row['source_aliases_json'] = json.dumps(extras, sort_keys=True)
+            aliased = True
+        chosen.append(row)
+    out = pd.DataFrame(chosen)
+    columns = list(rows.columns)
+    if aliased and 'source_aliases_json' not in columns:
+        columns.append('source_aliases_json')
+    return out.reindex(columns=columns)
+
+
+def unassessable_cells_from_days(days):
+    """Map cycle_id to unverified year/make cells stored on catalog days."""
+    if days is None or days.empty or 'unverified_cells_json' not in days.columns:
+        return None
+    mapping = {}
+    for row in days.itertuples():
+        raw = getattr(row, 'unverified_cells_json', None)
+        if raw is None or (isinstance(raw, float) and pd.isna(raw)) or raw == '':
+            continue
+        mapping[row.cycle_id] = json.loads(raw)
+    return mapping or None
+
+
 def _verified_manifest(directory):
     """Verify the immutable export and retained sources, without running a collector."""
     manifest_path = directory/'manifest.json'
@@ -142,24 +225,38 @@ def read_catalog_history(export_directory, *, as_of):
     clocks = rows.observed_at_utc.map(_aware)
     if not clocks.empty and not clocks.between(_aware(report['window_start']), _aware(report['window_end'])).all():
         raise ValueError('Catalog observations fall outside the retained collection window')
-    scope = dict(endpoint=ENDPOINT, primary_zip=config['primary_zip'], location_filter=False,
-                 sort='MostPopular', declared_leaves=report['leaf_queries'])
-    complete = report['primary_queries_complete']
-    if type(complete) is not bool:
-        raise ValueError('Catalog primary completeness must be an explicit boolean')
-    if complete and (len(selected) != len(leaf_ids) or not checked.query_complete.eq(1).all()):
-        raise ValueError('Catalog complete primary scope has missing or incomplete leaves')
+    rows = collapse_same_day_memberships(rows)
+    scope = catalog_population_scope(config, report)
+    plan_hash = leaf_plan_digest(report['leaf_queries'])[:16]
+    if report.get('format') == 'carvana-full-inventory-run-v3' and 'unverified_share' in report:
+        share, limit = report['unverified_share'], config.get('max_unverified_share', 0.005)
+        if isinstance(share, bool) or isinstance(limit, bool):
+            raise ValueError('Catalog unverified share must be numeric')
+        if not isinstance(share, (int, float)) or not isinstance(limit, (int, float)) or limit < 0:
+            raise ValueError('Catalog unverified share and max_unverified_share must be nonnegative numbers')
+        complete = share <= limit
+    else:
+        complete = report['primary_queries_complete']
+        if type(complete) is not bool:
+            raise ValueError('Catalog primary completeness must be an explicit boolean')
+        if complete and (len(selected) != len(leaf_ids) or not checked.query_complete.eq(1).all()):
+            raise ValueError('Catalog complete primary scope has missing or incomplete leaves')
+    if complete:
+        reason = 'Complete declared primary leaves; national coverage unverified'
+    else:
+        reason = 'Incomplete primary scope; retained positive observations only'
+    if report.get('format') == 'carvana-full-inventory-run-v3':
+        reason = f'{reason}; leaf_plan={plan_hash}'
     day = dict(cycle_id=budget['cycle_id'], cycle_date=report['cycle_date'], timezone=config['timezone'],
         window_start=clocks.min().isoformat() if len(clocks) else report['started_at'],
         window_end=clocks.max().isoformat() if len(clocks) else report['ended_at'],
         scope_id='catalog:'+hashlib.sha256(json.dumps(scope, sort_keys=True).encode()).hexdigest(),
-        coverage_complete=complete,
-        coverage_reason='Complete declared primary leaves; national coverage unverified' if complete else
-                        'Incomplete primary scope; retained positive observations only',
-        available_at=available.isoformat())
+        coverage_complete=complete, coverage_reason=reason, available_at=available.isoformat())
+    if report.get('format') == 'carvana-full-inventory-run-v3':
+        day['unverified_cells_json'] = json.dumps(unverified_cells_from_report(report), sort_keys=True)
     if available > cutoff:
         return pd.DataFrame(columns=CYCLE_COLUMNS), empty
-    return pd.DataFrame([day], columns=CYCLE_COLUMNS), rows
+    return pd.DataFrame([day]), rows
 
 
 def _legacy_provenance(rows, source, *, as_of):

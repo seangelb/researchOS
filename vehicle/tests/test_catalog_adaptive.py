@@ -35,7 +35,17 @@ def test_small_cell_is_one_query_and_a_large_cell_waits_for_models():
     models = [dict(key='A', count=200, modelIds=[1]), dict(key='B', count=300, modelIds=[2])]
     split = adaptive_cell(dict(count=500, parentModels=models), make='Jeep', query_id='year_2026_make_001',
                           year_bounds={'min': 2026, 'max': 2026}, zip_code='08542', threshold=480)
-    assert split['kind'] == 'split' and len(split['leaves']) == 2
+    assert split['kind'] == 'split' and len(split['leaves']) == 2 and split['overlap'] is None
+    shared = [dict(key='Silverado 3500', count=11, modelIds=[497, 3]),
+              dict(key='Silverado 3500 HD Chassis Cab', count=1, modelIds=[497, 4])]
+    overlap = adaptive_cell(dict(count=11, parentModels=shared), make='Chevrolet',
+                            query_id='year_2025_make_006',
+                            year_bounds={'min': 2025, 'max': 2025}, zip_code='08542', threshold=5)
+    assert overlap['kind'] == 'split'
+    assert overlap['reason'] == 'overlapping model ids; each model collected'
+    assert overlap['overlap']['shared_model_ids'] == [497]
+    assert overlap['overlap']['clusters'][0]['models'] == [
+        'Silverado 3500', 'Silverado 3500 HD Chassis Cab']
     assert adaptive_estimate([small, split]) == small['requests'] + split['requests']
 
 
@@ -111,6 +121,83 @@ def test_adaptive_run_collects_small_cells_without_a_separate_probe(year_experim
     assert 'query_intent' in events and 'query_result' in events
     export_catalog(experiment.folder, output=tmp_path / 'adaptive-export')
     assert (tmp_path / 'adaptive-export' / 'history.sqlite').is_file()
+
+
+def test_adaptive_overlap_is_recorded_and_export_accepts_a_missing_cluster(year_experiment, tmp_path):
+    experiment = year_experiment
+    experiment.config.update(format='carvana-full-inventory-v3', partition_strategy='year_make_adaptive',
+                             split_threshold_vehicles=24, max_unverified_share=0.005,
+                             plan_estimate_requests=500)
+    experiment.path.write_text(json.dumps(experiment.config), encoding='utf-8')
+    shared = next(v for v in experiment.vehicles if v['year'] == 2010 and v['parentModel'] == 'A5')
+
+    def send(url, **kwargs):
+        response = experiment.send(url, **kwargs)
+        request = kwargs['json']
+        filters = request['filters']
+        makes = filters.get('makes') or []
+        if (makes and makes[0].get('name') == 'Audi'
+                and filters.get('year') == {'min': 2010, 'max': 2010}
+                and not makes[0].get('parentModels')):
+            data = json.loads(response.content)
+            bucket = data['facetData']['makes']['Audi']
+            for child in bucket['parentModels']:
+                if child['key'] in ('A4', 'A5'):
+                    child['modelIds'] = [497, *child['modelIds']]
+            data['inventory']['pagination']['totalMatchedInventory'] = (
+                sum(child['count'] for child in bucket['parentModels']) - 1)
+            data['inventory']['pagination']['totalMatchedPages'] = (
+                data['inventory']['pagination']['totalMatchedInventory'] + 23) // 24
+            bucket['count'] = data['inventory']['pagination']['totalMatchedInventory']
+            response.content = json.dumps(data).encode()
+        models = makes[0].get('parentModels') if makes else None
+        if (models and models[0]['name'] == 'A4'
+                and filters.get('year') == {'min': 2010, 'max': 2010}
+                and request['pagination']['page'] == 1):
+            data = json.loads(response.content)
+            bucket = data['facetData']['makes']['Audi']
+            for child in bucket['parentModels']:
+                if child['key'] in ('A4', 'A5'):
+                    child['modelIds'] = [497, *child.get('modelIds', [])]
+            if not any(v.get('parentModel') == 'A5' for v in data['inventory']['vehicles']):
+                data['inventory']['vehicles'] = [dict(shared, parentModel='A5', model='A5'),
+                                                *data['inventory']['vehicles']]
+                data['inventory']['pagination']['totalMatchedInventory'] += 1
+                data['inventory']['pagination']['totalMatchedPages'] = (
+                    data['inventory']['pagination']['totalMatchedInventory'] + 23) // 24
+            response.content = json.dumps(data).encode()
+        return response
+
+    report = run_years(experiment, send)
+    make = next(entry for entry in report['entries']
+                if entry['role'] == 'make_discovery'
+                and entry['query']['filters'].get('year') == {'min': 2010, 'max': 2010}
+                and entry['query']['filters']['makes'][0]['name'] == 'Audi')
+    assert make['partition_reason'] == 'overlapping model ids; each model collected'
+    assert make['model_id_overlap']['shared_model_ids'] == [497]
+    assert report['explained_duplicate_primary_memberships'] == 1
+    assert report['unexplained_duplicate_primary_memberships'] == 0
+    export_catalog(experiment.folder, output=tmp_path / 'recorded-export')
+    saved = json.loads((experiment.folder / 'catalog_report.json').read_text(encoding='utf-8'))
+    for entry in saved['entries']:
+        if entry.get('role') == 'make_discovery':
+            entry.pop('partition_reason', None)
+            entry.pop('model_id_overlap', None)
+    entries = {entry['query']['query_id']: entry for entry in saved['entries']}
+    for row in saved.get('year_reconciliation') or []:
+        bounds = {}
+        if row.get('year_min') is not None:
+            bounds['min'] = row['year_min']
+        if row.get('year_max') is not None:
+            bounds['max'] = row['year_max']
+        probes = [query for query in saved.get('planned_make_probes') or []
+                  if query['filters']['year'] == bounds]
+        row['validated_make_queries'] = sum(
+            'partition_reason' in entries.get(query['query_id'], {}) for query in probes)
+    (experiment.folder / 'catalog_report.json').write_text(json.dumps(saved), encoding='utf-8')
+    output = export_catalog(experiment.folder, output=tmp_path / 'derived-export')
+    observations = pd.read_csv(output / 'observations.csv')
+    assert shared['vin'] in set(observations.vin)
 
 
 def test_retained_september_24_make_facets_plan_about_4068_requests():

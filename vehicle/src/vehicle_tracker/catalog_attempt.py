@@ -466,6 +466,21 @@ def collect_catalog(config_path, *, expected_sha256, post=None, attempt=1, spaci
                 report['entries'][-1]['isolation_reason'] = str(error)
                 return None
             if decided['kind'] == 'split':
+                entry = report['entries'][-1]
+                models = (facets['facet_data']['makes'].get(cell['make']) or {}).get('parentModels') or []
+                try:
+                    children, reason, overlap = model_partitions(
+                        facets, cell['make'], config['primary_zip'], identity, year_bounds=bounds)
+                except ValueError:
+                    children, reason, overlap = None, None, None
+                if children == decided['leaves']:
+                    entry.update(discovery_observed_at_utc=facets['captured_at_utc'],
+                        native_model_count_sum=sum(child['count'] for child in models) if models else None,
+                        partition_reason=reason)
+                    if overlap is not None:
+                        entry['model_id_overlap'] = overlap
+                elif decided.get('overlap') is not None:
+                    entry['model_id_overlap'] = decided['overlap']
                 return decided['leaves']
             return [decided['fallback']]
 

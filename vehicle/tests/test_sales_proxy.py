@@ -1,4 +1,6 @@
 """Entirely synthetic sales-proxy cases; no network, retained data, or database writes."""
+import time
+
 import pandas as pd
 import pytest
 
@@ -6,7 +8,8 @@ from vehicle_tracker.events import CYCLE_COLUMNS
 from vehicle_tracker.history import OBSERVATION_COLUMNS
 from vehicle_tracker.sales_proxy import (allocate_intervals, cohort_estimates, disappearance_events,
                                         inventory_flows, inventory_exit_episodes, inventory_followup_queue, native_estimate_revisions,
-                                        native_transition_events, native_visits, reappearance_summary)
+                                        native_transition_events, native_visits, reappearance_summary,
+                                        sampled_exit_estimate, wilson_resolved_interval)
 
 
 def synthetic_vehicle(number=1, role='prospective_inventory'):
@@ -736,3 +739,82 @@ def test_synthetic_seven_day_absence_requires_its_own_complete_streak():
     assert eighth_absent.candidate_id.item() == recovered.candidate_id.item()
     current_partial, _ = disappearance_events(continued_schedule, inventory, as_of='2026-09-14T23:00Z', absence_days=7)
     assert not current_partial.eligible.item()
+
+
+def test_followup_queue_finishes_quickly_at_catalog_scale():
+    n_keep, n_exit, days = 49900, 100, 4
+    vins = [synthetic_vehicle(i + 1) for i in range(n_keep + n_exit)]
+    schedule = synthetic_cycles(range(1, days + 1))
+    rows = []
+    for day in range(1, days + 1):
+        start, stop = (0, n_keep) if day > 1 else (0, n_keep + n_exit)
+        for number in range(start, stop):
+            vehicle = vins[number]
+            rows.append(dict.fromkeys(OBSERVATION_COLUMNS) | dict(
+                cycle_id=f'synthetic-{day}', retailer='carvana', vin=vehicle['vin'],
+                listing_id=vehicle['listing_id'], capture_id=f'synthetic-capture-{day}-{number}',
+                run_id=f'synthetic-run-{day}', observed_at_utc=f'2026-09-{day:02}T14:30:00Z',
+                source_url=f'synthetic://inventory/{day}', source_path=f'synthetic://raw/{day}',
+                listing_url=vehicle['url'], asking_price_usd=10000, purchase_pending=False,
+                vehicle_lock_type=0))
+    inventory = pd.DataFrame(rows)
+    started = time.perf_counter()
+    queue = inventory_followup_queue(schedule, inventory, pd.DataFrame(), [],
+                                     as_of='2026-09-04T23:00:00Z', control_count=2)
+    elapsed = time.perf_counter() - started
+    assert elapsed < 90
+    assert queue.selection_group.eq('new_exit').any()
+    assert queue.random_control.sum() == 2
+    assert int(queue.control_frame_vins.iloc[0]) == n_keep
+    assert len(queue) < 400
+
+
+def test_sampled_exit_estimate_weights_wilson_and_zero_resolved_day():
+    def episode(number, date='2026-09-04'):
+        vehicle = synthetic_vehicle(number)
+        return dict(retailer='carvana', vin=vehicle['vin'], listing_id=vehicle['listing_id'],
+                    detected_date=date, interval_end='2026-09-02T15:00:00Z',
+                    first_disappearance_at='2026-09-02T15:00:00Z')
+
+    absences = pd.DataFrame([episode(i) for i in range(1, 11)] + [episode(11, '2026-09-05')])
+    selected = [
+        dict(synthetic_vehicle(1), selection_group='new_exit', selected_for_check=True,
+             selection_probability=0.2),
+        dict(synthetic_vehicle(2), selection_group='new_exit', selected_for_check=True,
+             selection_probability=0.2),
+        dict(synthetic_vehicle(11), selection_group='new_exit', selected_for_check=True,
+             selection_probability=0.5)]
+    queue = pd.DataFrame(selected)
+    records = pd.DataFrame([
+        native(3, 'Sold', vehicle=synthetic_vehicle(1), checked_at='2026-09-03T10:00:00Z',
+               available_at='2026-09-03T10:00:00Z'),
+        native(3, 'Available', vehicle=synthetic_vehicle(2), checked_at='2026-09-03T10:00:00Z',
+               available_at='2026-09-03T10:00:00Z')])
+    estimate = sampled_exit_estimate(absences, queue, records, as_of='2026-09-05T23:00:00Z')
+    by_date = estimate.set_index('detection_date')
+    first = by_date.loc['2026-09-04']
+    assert first.exits == 10 and first.checked == 2 and first.sold == 1 and first.available == 1
+    assert first.unresolved == 0
+    assert first.sold_share == pytest.approx(0.5)
+    low, high = wilson_resolved_interval(5.0, 10.0)
+    assert first.sold_share_wilson95_low == pytest.approx(low)
+    assert first.sold_share_wilson95_high == pytest.approx(high)
+    assert first.sold_share_full_sample_low == pytest.approx(0.5)
+    assert first.sold_share_full_sample_high == pytest.approx(0.5)
+    assert first.estimated_sold_exits == pytest.approx(5.0)
+    assert first.estimated_sold_exits_low == pytest.approx(10 * low)
+    assert first.estimated_sold_exits_high == pytest.approx(10 * high)
+    empty = by_date.loc['2026-09-05']
+    assert empty.exits == 1 and empty.checked == 1 and empty.unresolved == 1
+    assert pd.isna(empty.sold_share) and pd.isna(empty.estimated_sold_exits)
+    assert empty.sold_share_full_sample_low == 0 and empty.sold_share_full_sample_high == 1
+    pooled = by_date.loc['pooled']
+    assert pooled.exits == 11 and pooled.checked == 3 and pooled.sold == 1
+    z = 1.959963984540054
+    fraction, resolved = 0.5, 10.0
+    center = (fraction + z * z / (2 * resolved)) / (1 + z * z / resolved)
+    half = z * ((fraction * (1 - fraction) / resolved + z * z / (4 * resolved ** 2)) ** 0.5) / (
+        1 + z * z / resolved)
+    assert low == pytest.approx(max(0.0, center - half))
+    assert high == pytest.approx(min(1.0, center + half))
+    assert 'not reported transactions' in first.interpretation

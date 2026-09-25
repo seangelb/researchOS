@@ -85,6 +85,23 @@ def test_partial_presence_is_visible_and_resets_absence():
     assert daily_counts(schedule, result).observed_vins.tolist() == [1, 1, 0]
 
 
+def test_unverified_cell_blocks_absence_only_for_its_own_cars():
+    schedule = cycles((1, 2))
+    source = observations(
+        (1, 'TESLA', 'L1', {'year': 2020, 'make': 'Tesla'}),
+        (1, 'CHEVY', 'L2', {'year': 2020, 'make': 'Chevrolet'}))
+    cells = {'c2': [dict(year_min=2020, year_max=2020, make='Tesla')]}
+    result = vin_events(schedule, source, absence_days=3, unassessable_cells=cells)
+    keyed = result.set_index(['cycle_id', 'vin'])
+    assert keyed.loc[('c2', 'TESLA'), 'event_type'] == 'absence_unassessable'
+    assert keyed.loc[('c2', 'TESLA'), 'absence_streak'] == 0
+    assert keyed.loc[('c2', 'CHEVY'), 'event_type'] == 'first_absence'
+    assert keyed.loc[('c2', 'CHEVY'), 'absence_streak'] == 1
+    unchanged = vin_events(schedule, source, absence_days=3)
+    assert unchanged.loc[unchanged.cycle_id.eq('c2'), 'event_type'].tolist() == [
+        'first_absence', 'first_absence']
+
+
 def test_partial_missing_then_return_is_not_a_confirmed_reappearance():
     schedule = cycles((1, 2, 3), partial=(2,))
     result = vin_events(schedule, observations((1, 'V1', 'L1'), (3, 'V1', 'L1')))

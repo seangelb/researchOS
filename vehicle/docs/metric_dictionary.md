@@ -93,6 +93,19 @@ Unknown dates remain unassigned. Reappearances and evidence gaps flag follow-up;
 they do not silently rewrite reviews. Zero reviewed confirmations is not zero
 population sales. A calibrated `estimated_sales` series is still unavailable.
 
+`sampled_exit_estimate` is a separately named table, not a fill for
+`estimated_sales`. The population is eligible three-day catalog exits by
+detection date. The sample is `new_exit` cars the follow-up queue randomly
+selected that later have a matched listing-page check after they left the
+catalog. The sold share uses inverse-probability weights and a 95% Wilson
+interval, plus full-sample bounds that treat unresolved checks as all non-Sold
+or all Sold. Estimated sold exits are exits times that share, low to high, per
+detection date and pooled. This is sold exits among detected catalog exits, not
+reported transactions. It misses cars that list and sell between sweeps and lags
+three days. A seven-date trial of about 84 exit checks has roughly plus or minus
+10 percentage points on the sold share. The first real estimate needs four
+consecutive complete same-scope days plus completed checks.
+
 `quarter_coverage` is a calendar of the quarter through the cutoff's local date.
 Complete means the declared cycle reconciled within its window, not that every
 transaction that day was observed. A missing cycle remains missing. A current-date

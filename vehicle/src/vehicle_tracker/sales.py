@@ -17,7 +17,8 @@ CANDIDATE_COLUMNS = ['candidate_id', 'scope_id', 'retailer', 'vin', 'listing_id'
 REVIEW_COLUMNS = ['candidate_id', 'outcome', 'sale_date', 'reviewer', 'source', 'available_at', 'note']
 
 
-def sale_candidates(cycles, observations, *, as_of, absence_days=3, reviews=None):
+def sale_candidates(cycles, observations, *, as_of, absence_days=3, reviews=None,
+                    events=None, unassessable_cells=None):
     """Return one row per qualifying absence episode and a daily diagnostic calendar.
 
     Candidates qualify on the persistent-absence detection day, never an inferred
@@ -34,10 +35,14 @@ def sale_candidates(cycles, observations, *, as_of, absence_days=3, reviews=None
         cycles = cycles.reindex(columns=CYCLE_COLUMNS)
     known = cycles.loc[pd.to_datetime(cycles.available_at.map(_aware), utc=True).le(cutoff)].copy()
     schedule = _cycles(known)
-    events = pd.DataFrame()
-    if not schedule.empty:
-        selected = observations.loc[observations.cycle_id.isin(schedule.cycle_id)].copy()
-        events = vin_events(known, selected, absence_days=absence_days)
+    if events is None:
+        events = pd.DataFrame()
+        if not schedule.empty:
+            selected = observations.loc[observations.cycle_id.isin(schedule.cycle_id)].copy()
+            events = vin_events(known, selected, absence_days=absence_days,
+                                unassessable_cells=unassessable_cells)
+    elif events.empty:
+        events = pd.DataFrame()
     episodes, active, onset = [], {}, {}
     for event in events.to_dict('records'):
         key = (event['retailer'], event['vin'])

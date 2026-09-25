@@ -155,3 +155,54 @@ def test_no_inputs_returns_defined_empty_tables():
     assert 'first_observed_at' in history and 'observed_vins' in cohorts
     with pytest.raises(ValueError, match='timezone aware'):
         catalog_history.observed_catalog_history(as_of='2026-09-19')
+
+
+def test_v3_population_scope_ignores_daily_leaf_plans():
+    config = dict(primary_zip='33130')
+    first = dict(format='carvana-full-inventory-run-v3',
+                 leaf_queries=[dict(query_id='year_2024_make_chevy')])
+    second = dict(format='carvana-full-inventory-run-v3',
+                  leaf_queries=[dict(query_id='year_2024_make_chevy_model_silverado')])
+    assert catalog_history.catalog_population_scope(config, first) == (
+        catalog_history.catalog_population_scope(config, second))
+    v1_a = dict(leaf_queries=first['leaf_queries'])
+    v1_b = dict(leaf_queries=second['leaf_queries'])
+    assert catalog_history.catalog_population_scope(config, v1_a) != (
+        catalog_history.catalog_population_scope(config, v1_b))
+    digest_a = catalog_history.leaf_plan_digest(first['leaf_queries'])
+    digest_b = catalog_history.leaf_plan_digest(second['leaf_queries'])
+    assert digest_a != digest_b
+
+
+def test_same_listing_overlap_collapses_and_two_listings_fail():
+    shared = dict(cycle_id='c1', retailer='carvana', vin='1GC3KSE77SF161034',
+                  listing_id='1001', observed_at_utc='2026-09-25T05:00:00Z')
+    rows = pd.DataFrame([
+        dict(shared, query_id='year_2025_make_chevy', run_id='r1'),
+        dict(shared, query_id='year_2025_make_chevy_silverado', run_id='r2',
+             observed_at_utc='2026-09-25T05:01:00Z')])
+    collapsed = catalog_history.collapse_same_day_memberships(rows)
+    assert len(collapsed) == 1
+    assert collapsed.iloc[0].run_id == 'r1'
+    aliases = json.loads(collapsed.iloc[0].source_aliases_json)
+    assert {item['query_id'] for item in aliases} == {
+        'year_2025_make_chevy', 'year_2025_make_chevy_silverado'}
+    conflict = rows.copy()
+    conflict.loc[1, 'listing_id'] = '1002'
+    with pytest.raises(ValueError, match='Conflicting VIN/listing'):
+        catalog_history.collapse_same_day_memberships(conflict)
+
+
+def test_unverified_cells_come_from_incomplete_union_leaves():
+    report = dict(leaf_queries=[
+        dict(query_id='tesla', filters=dict(year=dict(min=2020, max=2020),
+                                           makes=[dict(name='Tesla')])),
+        dict(query_id='chevy', filters=dict(year=dict(min=2020, max=2020),
+                                           makes=[dict(name='Chevrolet')]))],
+        leaf_union=[dict(query_id='tesla', complete_by_union=False),
+                    dict(query_id='chevy', complete_by_union=True)])
+    assert catalog_history.unverified_cells_from_report(report) == [
+        dict(year_min=2020, year_max=2020, make='Tesla')]
+    days = pd.DataFrame([dict(cycle_id='c1', unverified_cells_json=json.dumps(
+        catalog_history.unverified_cells_from_report(report)))])
+    assert catalog_history.unassessable_cells_from_days(days)['c1'][0]['make'] == 'Tesla'

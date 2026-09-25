@@ -61,6 +61,35 @@ def _replay_adaptive_leaves(report, config):
     return leaves
 
 
+def _overlap_for_discovery(entry, *, adaptive):
+    """Use the saved cluster, or rebuild it from an adaptive probe facet.
+
+    September 25 adaptive splits collected Silverado siblings without writing
+    ``model_id_overlap``. The retained make-probe facet still has the model ids.
+    A cluster that does not fit the probe counts stays absent, and the sibling
+    check still fails.
+    """
+    if entry.get('role') != 'make_discovery':
+        return None
+    if entry.get('model_id_overlap'):
+        return entry['model_id_overlap']
+    if not adaptive or not entry.get('report'):
+        return None
+    try:
+        child = json.loads(Path(entry['report']).read_text(encoding='utf-8'))
+        page = next(item for item in child.get('pages') or [] if item.get('facet_source'))
+        facet = json.loads(Path(page['facet_source']).read_text(encoding='utf-8'))
+        make = entry['query']['filters']['makes'][0]['name']
+        bucket = facet['facet_data']['makes'][make]
+        total = facet['pagination']['totalMatchedInventory']
+    except (OSError, ValueError, StopIteration, KeyError, TypeError):
+        return None
+    from vehicle_tracker.catalog_plan import _model_id_overlap
+    if type(total) is not int:
+        return None
+    return _model_id_overlap(bucket.get('parentModels') or [], total)
+
+
 def export_catalog(folder, *, output):
     """Replay query sources, import only primary leaves, and publish a fresh audit.
 
@@ -250,7 +279,7 @@ def export_catalog(folder, *, output):
                     siblings = set(overlap_siblings(facet.get('facet_data'), q['filters']))
                     allowed = set()
                     for disc in report['entries']:
-                        overlap = disc.get('model_id_overlap')
+                        overlap = _overlap_for_discovery(disc, adaptive=adaptive)
                         if (disc.get('role') != 'make_discovery' or not overlap
                                 or disc['query']['filters']['makes'][0]['name'] != q['filters']['makes'][0]['name']
                                 or disc['query']['filters'].get('year') != q['filters'].get('year')):

@@ -6,6 +6,7 @@ No collector, database writer, fitted probability, or national scaling lives her
 """
 import hashlib
 import json
+from math import sqrt
 
 import pandas as pd
 
@@ -13,6 +14,18 @@ from vehicle_tracker.events import _aware, vin_events
 from vehicle_tracker.sale_pilot import _url_id, known_disjoint_cohorts, summarize_pilot
 from vehicle_tracker.sales import sale_candidates
 from vehicle_tracker.vehicle_history import followup_identities
+
+
+def wilson_resolved_interval(sold, resolved):
+    """Same 95% Wilson interval as status_experiment.arm_outcomes."""
+    if not resolved:
+        return None, None
+    fraction = sold / resolved
+    z = 1.959963984540054
+    center = (fraction + z * z / (2 * resolved)) / (1 + z * z / resolved)
+    half = z * sqrt(fraction * (1 - fraction) / resolved + z * z / (4 * resolved ** 2)) / (
+        1 + z * z / resolved)
+    return max(0.0, center - half), min(1.0, center + half)
 
 
 EVENT_COLUMNS = [
@@ -59,13 +72,20 @@ def reappearance_summary(departures, reappearances, *, latest_snapshot):
         interpretation='Separate episode and unique retailer/VIN fractions; NOT transaction error rates')])
 
 
-def inventory_exit_episodes(cycles, observations, *, as_of):
+def _rows_by_vin(rows):
+    if rows is None or rows.empty:
+        return {}
+    return {key: part for key, part in rows.groupby(['retailer', 'vin'], sort=False)}
+
+
+def inventory_exit_episodes(cycles, observations, *, as_of, events=None, unassessable_cells=None):
     """Retain each complete-sweep exit and any later observed reappearance.
 
     These are one-day absence candidates from the existing reader, not sales.
     Incomplete/missing dates preserve an open episode without proving absence.
     """
-    episodes, _ = sale_candidates(cycles, observations, as_of=as_of, absence_days=1)
+    episodes, _ = sale_candidates(cycles, observations, as_of=as_of, absence_days=1,
+                                  events=events, unassessable_cells=unassessable_cells)
     episodes = episodes.rename(columns={'candidate_id': 'exit_episode_id'})
     known = cycles.loc[cycles.available_at.map(_aware).le(_aware(as_of))]
     complete_rows = observations.loc[observations.cycle_id.isin(known.loc[known.coverage_complete, 'cycle_id'])]
@@ -80,9 +100,10 @@ def inventory_exit_episodes(cycles, observations, *, as_of):
     episodes['reappeared_at'] = pd.Series(pd.NaT, index=episodes.index, dtype='datetime64[ns, UTC]')
     episodes['reappeared_listing_id'] = None
     rows = observations.merge(known[['cycle_id', 'cycle_date']], on='cycle_id', validate='many_to_one')
+    by_vin = _rows_by_vin(rows)
     for index, episode in episodes.loc[episodes.reappeared_date.notna()].iterrows():
-        returned = rows.loc[rows.retailer.eq(episode.retailer) & rows.vin.eq(episode.vin)
-                            & rows.cycle_date.eq(episode.reappeared_date)].iloc[0]
+        own = by_vin.get((episode.retailer, episode.vin))
+        returned = own.loc[own.cycle_date.eq(episode.reappeared_date)].iloc[0]
         episodes.loc[index, 'reappeared_at'] = _aware(returned.observed_at_utc)
         episodes.loc[index, 'reappeared_listing_id'] = returned.listing_id
     return episodes
@@ -168,7 +189,8 @@ def _queue_identities(membership, visits, rows, *, as_of):
 
 def inventory_followup_queue(cycles, observations, records, cohorts, *, as_of,
                              selection_plans=None, batch_limit=12, control_count=2,
-                             seed='carvana-followup-v1', browser_health=None):
+                             seed='carvana-followup-v1', browser_health=None,
+                             events=None, unassessable_cells=None):
     """Offline, one-VIN preview; preserve exits, selected studies and their clocks.
 
     Priority conflicts precede due persistence, random unselected exits, other
@@ -185,10 +207,14 @@ def inventory_followup_queue(cycles, observations, records, cohorts, *, as_of,
     known = cycles.loc[cycles.available_at.map(_aware).le(cutoff)].sort_values('cycle_date')
     rows = observations.loc[observations.cycle_id.isin(known.cycle_id)].copy()
     rows = rows.merge(known[['cycle_id', 'available_at']], on='cycle_id', validate='many_to_one')
-    events = vin_events(known, rows.drop(columns='available_at')) if not known.empty else pd.DataFrame()
+    inventory = rows.drop(columns='available_at')
+    if events is None:
+        events = vin_events(known, inventory, absence_days=1, unassessable_cells=unassessable_cells
+                            ) if not known.empty else pd.DataFrame()
     complete = known.loc[known.coverage_complete.eq(True)]
     complete_rows = rows.loc[rows.cycle_id.isin(complete.cycle_id)]
-    episodes = inventory_exit_episodes(known, rows.drop(columns='available_at'), as_of=as_of)
+    episodes = inventory_exit_episodes(known, inventory, as_of=as_of, events=events,
+                                       unassessable_cells=unassessable_cells)
     latest_exits = episodes.sort_values('detected_date').drop_duplicates(['retailer', 'vin'], keep='last')
     exit_by_vin = {(r.retailer, r.vin): r for r in latest_exits.itertuples()}
     latest = {(r.retailer, r.vin): r for r in complete_rows.loc[
@@ -211,8 +237,37 @@ def inventory_followup_queue(cycles, observations, records, cohorts, *, as_of,
             members[(vehicle['retailer'], vehicle['vin'])] = dict(vehicle,
                 cohort_id=cohort['cohort_id'], selected_at=cohort['selected_at'])
 
-    # Keep all sampling-frame rows, including unselected controls, for review.
-    keys = set(members) | set(exit_by_vin) | set(plans_by_vin) | set(latest)
+    event_keys = set()
+    if not events.empty:
+        changed = events.loc[events.observed_in_cycle
+            & (events.reappeared_after_absence.eq(True) | events.event_type.eq('relisted'))]
+        event_keys.update(zip(changed.retailer, changed.vin))
+        if not complete.empty:
+            pending = events.loc[events.cycle_id.eq(complete.iloc[-1].cycle_id)
+                                 & events.pending_changed.eq(True)]
+            event_keys.update(zip(pending.retailer, pending.vin))
+    if not valid.empty:
+        sold = valid.loc[valid.saleStatus.eq('Sold')]
+        event_keys.update(zip(sold.retailer, sold.vin))
+    real_keys = set(members) | set(exit_by_vin) | set(plans_by_vin) | event_keys
+    control_pool = []
+    for key, row in latest.items():
+        if key in real_keys:
+            continue
+        url, listing = getattr(row, 'listing_url', None), getattr(row, 'listing_id', None)
+        if isinstance(url, str) and listing is not None and _url_id(url) == listing:
+            rank = hashlib.sha256(json.dumps([str(seed), 'control', key[0], key[1]]).encode()).hexdigest()
+            control_pool.append((rank, key))
+    control_frame_size = len(control_pool)
+    if control_frame_size <= 256:
+        control_keys = {key for _, key in control_pool}
+    else:
+        control_keys = {key for _, key in sorted(control_pool)[:max(control_count * 20, 32)]}
+    # Candidates plus a seeded control sample. The latest day is not iterated in full.
+    keys = real_keys | control_keys
+    first_by_vin = {} if rows.empty else {
+        (r.retailer, r.vin): r for r in rows.sort_values('observed_at_utc').drop_duplicates(
+            ['retailer', 'vin']).itertuples()}
     originals = []
     for key in sorted(keys):
         if key in members:
@@ -220,7 +275,7 @@ def inventory_followup_queue(cycles, observations, records, cohorts, *, as_of,
         elif key in plans_by_vin:
             original = plans_by_vin[key].iloc[0].to_dict()
         else:
-            first = rows.loc[rows.retailer.eq(key[0]) & rows.vin.eq(key[1])].sort_values('observed_at_utc').iloc[0]
+            first = first_by_vin[key]
             original = dict(retailer=key[0], vin=key[1], listing_id=first.listing_id, url=first.listing_url)
         originals.append({name: original.get(name) for name in ['retailer', 'vin', 'listing_id', 'url', 'role', 'cohort_id']})
     if not originals:
@@ -228,18 +283,27 @@ def inventory_followup_queue(cycles, observations, records, cohorts, *, as_of,
     membership = pd.DataFrame(originals)
     identities = _queue_identities(membership, visits, rows, as_of=as_of)
     identities['conflicting_page_listing_id'] = None
+    visits_by_vin = _rows_by_vin(visits)
+    valid_by_vin = _rows_by_vin(valid)
+    events_by_vin = _rows_by_vin(events)
+    rows_by_vin = _rows_by_vin(rows)
+    empty_visits = visits.iloc[0:0]
+    empty_events = events.iloc[0:0] if not events.empty else pd.DataFrame()
+    latest_cycle = complete.iloc[-1].cycle_id if not complete.empty else None
     output_rows = []
     for identity in identities.to_dict('records'):
         key = (identity['retailer'], identity['vin'])
-        history = visits.loc[visits.retailer.eq(key[0]) & visits.vin.eq(key[1])] if not visits.empty else visits
-        native = valid.loc[valid.retailer.eq(key[0]) & valid.vin.eq(key[1])] if not valid.empty else valid
+        history = visits_by_vin.get(key, empty_visits)
+        native = valid_by_vin.get(key, empty_visits)
+        own_rows = rows_by_vin.get(key, rows.iloc[0:0])
+        own_events = events_by_vin.get(key, empty_events)
         episode, selected = exit_by_vin.get(key), plans_by_vin.get(key, pd.DataFrame())
         unresolved = pd.notna(identity.get('deferred_reason'))
         reasons, conflict = ([identity['deferred_reason']], True) if unresolved else ([], False)
         presence = latest_presence.get(key)
         if not unresolved and presence is not None and presence.listing_id != identity['followup_listing_id']:
             target_id = identity['followup_listing_id']
-            earlier = rows.loc[rows.retailer.eq(key[0]) & rows.vin.eq(key[1]) & rows.listing_id.eq(target_id)]
+            earlier = own_rows.loc[own_rows.listing_id.eq(target_id)]
             target_times = list(earlier.observed_at_utc.map(_aware))
             if not native.empty:
                 target_times.extend(native.loc[native.listing_id.eq(target_id), 'checked_at'])
@@ -259,8 +323,8 @@ def inventory_followup_queue(cycles, observations, records, cohorts, *, as_of,
         trigger = _aware(episode.first_disappearance_at) if episode is not None else first_selected
         if pd.isna(trigger):
             trigger = native.checked_at.min() if not native.empty else cutoff
-        changes = events.loc[events.retailer.eq(key[0]) & events.vin.eq(key[1]) & events.observed_in_cycle
-            & (events.reappeared_after_absence | events.event_type.eq('relisted'))] if not events.empty else events
+        changes = own_events.loc[own_events.observed_in_cycle
+            & (own_events.reappeared_after_absence | own_events.event_type.eq('relisted'))] if not own_events.empty else own_events
         if not changes.empty:
             changed = changes.sort_values('observed_at_utc').iloc[-1]
             trigger = max(trigger, _aware(changed.observed_at_utc))
@@ -277,8 +341,7 @@ def inventory_followup_queue(cycles, observations, records, cohorts, *, as_of,
                 reasons.append('conflicting native status or later inventory presence')
                 contradiction_at = latest_native.checked_at
                 if contrary:
-                    later_presence = rows.loc[rows.retailer.eq(key[0]) & rows.vin.eq(key[1])
-                        & rows.observed_at_utc.map(_aware).gt(latest_native.checked_at)]
+                    later_presence = own_rows.loc[own_rows.observed_at_utc.map(_aware).gt(latest_native.checked_at)]
                     contradiction_at = later_presence.observed_at_utc.map(_aware).min()
                 trigger = max(trigger, contradiction_at)
             if native.saleStatus.eq('Sold').any():
@@ -287,8 +350,8 @@ def inventory_followup_queue(cycles, observations, records, cohorts, *, as_of,
             if not returned_native.empty:
                 trigger = max(trigger, returned_native.checked_at.max())
                 reasons.append('native Available after Sold; fresh follow-up episode')
-        recent_events = events.loc[events.cycle_id.eq(complete.iloc[-1].cycle_id) & events.retailer.eq(key[0])
-            & events.vin.eq(key[1])] if not events.empty and not complete.empty else pd.DataFrame()
+        recent_events = own_events.loc[own_events.cycle_id.eq(latest_cycle)] if (
+            not own_events.empty and latest_cycle is not None) else pd.DataFrame()
         pending_changed = not recent_events.empty and recent_events.pending_changed.eq(True).any()
         if pending_changed:
             reasons.append('pending started or pending cleared')
@@ -371,6 +434,7 @@ def inventory_followup_queue(cycles, observations, records, cohorts, *, as_of,
     output['selected_for_check'] = output.index.isin(picked)
     output['random_control'] = output.selected_for_check & output.selection_group.eq('control')
     output['frame_size'] = output.selection_group.map({group: len(frame) for group, frame in frames.items()})
+    output.loc[output.selection_group.eq('control'), 'frame_size'] = control_frame_size
     selected_counts = output.loc[output.selected_for_check].groupby('selection_group').size()
     output['frame_selected'] = output.selection_group.map(selected_counts).fillna(0).astype(int)
     random_frame = output.selection_group.isin(['new_exit', 'control']) & output.eligible_for_selection
@@ -378,7 +442,7 @@ def inventory_followup_queue(cycles, observations, records, cohorts, *, as_of,
     output['selection_seed'] = str(seed)
     output['eligibility_rule'] = 'Known evidence; 24h since any VIN visit; study outstanding or unselected control'
     output['queue_rank'] = range(1, len(output)+1)
-    output['control_frame_vins'] = len(frames['control'])
+    output['control_frame_vins'] = control_frame_size
     output['candidate_frame_vins'] = int(output.candidate_event.sum())
     output['latest_complete_cycle'] = complete.iloc[-1].cycle_id if not complete.empty else None
     output['latest_complete_date'] = complete.iloc[-1].cycle_date if not complete.empty else None
@@ -557,14 +621,16 @@ def inventory_flows(cycles, observations, *, as_of):
     return pd.DataFrame(result)
 
 
-def disappearance_events(cycles, observations, *, as_of, absence_days=3):
+def disappearance_events(cycles, observations, *, as_of, absence_days=3,
+                         events=None, unassessable_cells=None):
     """Reuse the existing consecutive-complete-calendar-date rule without weakening it.
 
     The disappearance interval ends at the first complete absent sweep. Evidence
     only becomes available at the later qualifying sweep. Gaps reset the streak.
     Returned and currently gapped episodes remain visible but are not eligible.
     """
-    candidates, calendar = sale_candidates(cycles, observations, as_of=as_of, absence_days=absence_days)
+    candidates, calendar = sale_candidates(cycles, observations, as_of=as_of, absence_days=absence_days,
+                                          events=events, unassessable_cells=unassessable_cells)
     result = candidates.copy()
     result['interval_start'] = result.last_observed_at
     first_absent = cycles.set_index('cycle_date').window_end.to_dict()
@@ -579,7 +645,9 @@ def disappearance_events(cycles, observations, *, as_of, absence_days=3):
     if not result.empty:
         known = cycles.loc[cycles.available_at.map(_aware).le(_aware(as_of))]
         selected = observations.loc[observations.cycle_id.isin(known.cycle_id)]
-        events = vin_events(known, selected, absence_days=absence_days)
+        if events is None:
+            events = vin_events(known, selected, absence_days=absence_days,
+                                unassessable_cells=unassessable_cells)
         latest = events.sort_values('cycle_date').drop_duplicates(['retailer', 'vin'], keep='last').set_index(['retailer', 'vin'])
         for index, candidate in result.iterrows():
             event = latest.loc[(candidate.retailer, candidate.vin)]
@@ -590,6 +658,114 @@ def disappearance_events(cycles, observations, *, as_of, absence_days=3):
                 and event.coverage_complete and event.absence_streak >= absence_days
                 and event.cycle_date == str(_aware(as_of).tz_convert(event.timezone).date()))
     return result, calendar
+
+
+def sampled_exit_estimate(absences, queue, records, *, as_of):
+    """Sold exits among detected catalog exits, with a weighted Wilson range.
+
+    Population: three-day exit episodes by detection date. Sample: exits the
+    queue randomly selected from new_exit that have a matched listing check
+    after the car left the catalog. Inverse-probability weights reuse the
+    recorded selection probability. This is not reported transactions; it
+    misses cars that list and sell between sweeps and lags three days.
+    """
+    cutoff = _aware(as_of)
+    interpretation = ('Sold exits among detected catalog exits; not reported '
+                      'transactions. Misses cars that list and sell between sweeps '
+                      'and lags three days.')
+    columns = ['detection_date', 'exits', 'checked', 'sold', 'available', 'unresolved',
+               'sold_share', 'sold_share_wilson95_low', 'sold_share_wilson95_high',
+               'sold_share_full_sample_low', 'sold_share_full_sample_high',
+               'estimated_sold_exits', 'estimated_sold_exits_low', 'estimated_sold_exits_high',
+               'interpretation', 'as_of']
+    empty = pd.DataFrame(columns=columns)
+    if absences is None or absences.empty:
+        return empty
+    visits = native_visits(records, as_of=as_of)
+    matched = visits.loc[visits.parse_outcome.eq('matched')
+                         & visits.saleStatus.isin(['Available', 'Sold'])] if not visits.empty else visits
+    selected = pd.DataFrame() if queue is None or queue.empty else queue
+    if not selected.empty:
+        selected = selected.loc[selected.selection_group.eq('new_exit') & selected.selected_for_check
+                                & selected.selection_probability.notna()]
+    selected_by_vin = {}
+    for row in selected.itertuples() if not selected.empty else []:
+        key = (row.retailer, row.vin)
+        selected_by_vin.setdefault(key, row)
+    visits_by_vin = _rows_by_vin(matched)
+
+    def left_at(episode):
+        for name in ['interval_end', 'first_disappearance_at']:
+            value = episode.get(name)
+            if value is not None and not (isinstance(value, float) and pd.isna(value)) and pd.notna(value):
+                return _aware(value)
+        first_absent = episode.get('first_absent_date')
+        return None if first_absent is None or pd.isna(first_absent) else None
+
+    def summarize(rows, date):
+        exits = len(rows)
+        checked = sold = available = unresolved = 0
+        sold_w = available_w = unresolved_w = 0.0
+        for episode in rows:
+            key = (episode['retailer'], episode['vin'])
+            pick = selected_by_vin.get(key)
+            if pick is None:
+                continue
+            weight = float(pick.selection_probability)
+            if weight <= 0:
+                continue
+            weight = 1.0 / weight
+            depart = left_at(episode)
+            history = visits_by_vin.get(key)
+            if history is None or history.empty:
+                checked += 1
+                unresolved += 1
+                unresolved_w += weight
+                continue
+            after = history if depart is None else history.loc[history.checked_at.gt(depart)]
+            usable = after.loc[after.checked_at.le(cutoff)] if not after.empty else after
+            if usable.empty:
+                checked += 1
+                unresolved += 1
+                unresolved_w += weight
+                continue
+            status = usable.sort_values('checked_at').iloc[-1].saleStatus
+            checked += 1
+            if status == 'Sold':
+                sold += 1
+                sold_w += weight
+            elif status == 'Available':
+                available += 1
+                available_w += weight
+            else:
+                unresolved += 1
+                unresolved_w += weight
+        resolved_w = sold_w + available_w
+        share = sold_w / resolved_w if resolved_w else None
+        if share is None:
+            low = high = None
+        else:
+            low, high = wilson_resolved_interval(share * resolved_w, resolved_w)
+        total_w = sold_w + available_w + unresolved_w
+        full_low = sold_w / total_w if total_w else None
+        full_high = (sold_w + unresolved_w) / total_w if total_w else None
+        estimate = None if share is None else exits * share
+        return dict(detection_date=date, exits=exits, checked=checked, sold=sold,
+                    available=available, unresolved=unresolved, sold_share=share,
+                    sold_share_wilson95_low=low, sold_share_wilson95_high=high,
+                    sold_share_full_sample_low=full_low, sold_share_full_sample_high=full_high,
+                    estimated_sold_exits=estimate,
+                    estimated_sold_exits_low=None if low is None else exits * low,
+                    estimated_sold_exits_high=None if high is None else exits * high,
+                    interpretation=interpretation, as_of=cutoff.isoformat())
+
+    episodes = absences.to_dict('records')
+    by_date = {}
+    for episode in episodes:
+        by_date.setdefault(episode['detected_date'], []).append(episode)
+    rows = [summarize(group, date) for date, group in sorted(by_date.items())]
+    rows.append(summarize(episodes, 'pooled'))
+    return pd.DataFrame(rows, columns=columns)
 
 
 def cohort_estimates(native_events, absences, records, cohorts, *, as_of):

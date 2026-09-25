@@ -81,6 +81,11 @@ available as `sale_candidate_rows`, including source keys and review provenance.
 | `candidate_reappearances` | Known candidate VINs observed again on this date; partial days may miss other returns |
 | `reviewed_sales_with_known_date` | Count of explicitly selected confirmed reviews by their evidenced sale date, known as of the selected cutoff |
 | `estimated_sales` | Missing; no automatic sales conversion |
+| `sampled_exit_estimate` | Separate table: detected three-day exits times the inverse-probability-weighted Sold share of randomly selected `new_exit` listing-page checks, with a 95% Wilson range and full-sample bounds |
+
+`sampled_exit_estimate` is sold exits among detected catalog exits. It is not
+reported transactions. It misses cars that list and sell between sweeps and lags
+three days. The daily `estimated_sales` column stays empty.
 
 Zero reviewed confirmations means no selected dated confirmations, not zero sales.
 Confirmed reviews without sale dates stay in the ledger but are not assigned to a
@@ -89,6 +94,21 @@ A later reappearance/gap sets `review_needs_followup` for a confirmed label; it
 does not silently modify the analyst outcome. The daily reviewed count includes
 those labels until the analyst explicitly selects a revised review. Inspect this
 flag before interpreting reviewed counts.
+
+## Full-inventory sampled Sold checks
+
+After a complete adaptive catalog day, the existing follow-up queue selects up to
+12 random `new_exit` cars plus 2 controls. Record those listing-page Sold checks
+through the current browser review and recording commands. Over a seven-date trial
+that is about 84 exit checks, so expect roughly plus or minus 10 percentage points
+on the sold share.
+
+The first real estimate needs at least four consecutive complete days (three to
+confirm an exit) plus completed checks. Replay selected catalog `analysis/` folders
+and saved checks with `vehicle/scripts/export_catalog_sales.py`. It makes no
+requests and writes nothing into captures. Adaptive v3 days share one population
+scope even when the leaf plan re-splits; unverified year/make cells make absence
+unassessable only for cars in those cells.
 
 ## Daily collection now has one command
 
