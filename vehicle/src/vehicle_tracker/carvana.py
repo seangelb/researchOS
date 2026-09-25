@@ -60,7 +60,7 @@ def listing_id(url: str) -> str:
     return match[1]
 
 
-def parse_capture(capture: dict) -> pd.DataFrame:
+def parse_capture(capture: dict, *, overlap_siblings=None) -> pd.DataFrame:
     """One row per listing: USD asking price, odometer miles, UTC observation time.
 
     Missing optional fields stay missing. Native schema availability and card text
@@ -74,7 +74,7 @@ def parse_capture(capture: dict) -> pd.DataFrame:
         raise ValueError('Capture requires a timezone-aware observation timestamp')
     if capture.get('capture_method') == 'carvana_search_projection':
         from vehicle_tracker.search import parse_search_capture
-        return parse_search_capture(capture)
+        return parse_search_capture(capture, overlap_siblings=overlap_siblings)
     if capture.get('capture_method') == 'browser_dom_projection':
         return parse_projection(capture)
     records = capture.get('records', [])

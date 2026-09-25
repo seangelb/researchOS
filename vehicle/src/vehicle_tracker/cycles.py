@@ -95,9 +95,10 @@ class CycleBudget(NavigationBudget):
     Saved UTC clocks reconstruct this process's monotonic budget. Downtime counts
     against the original allowance. Every reservation consumes a request, including
     an uncertain outcome; only its pending flag clears when evidence is durable.
-    A stopped or uncertain cycle cannot retry.
+    A page-level transport retry may abandon that pending reservation after
+    recording it; access failures still stop the cycle.
     """
-    def __init__(self, path):
+    def __init__(self, path, *, pause_seconds=3):
         self.path = Path(path)
         state = _cycle_state(self.path)
         saved = state['budget']
@@ -113,7 +114,10 @@ class CycleBudget(NavigationBudget):
         window_seconds = (aware(state['window_end']) - aware(state['created_at'])).total_seconds()
         self.max_seconds = min(state['max_seconds'], window_seconds)
         self.started = time.monotonic() - elapsed_seconds
-        self.requests, self.stopped, self.pause_seconds = saved['requests'], False, 3
+        if (type(pause_seconds) not in (int, float) or isinstance(pause_seconds, bool)
+                or not math.isfinite(pause_seconds) or pause_seconds < 3):
+            raise ValueError('Attempt spacing must be at least three seconds')
+        self.requests, self.stopped, self.pause_seconds = saved['requests'], False, pause_seconds
         if saved['last_request_utc']:
             # Reconstruct spacing from the last attempt, not this process's start.
             self.last_request = time.monotonic() - (now - aware(saved['last_request_utc'])).total_seconds()
@@ -165,6 +169,16 @@ class CycleBudget(NavigationBudget):
         state['budget']['stopped'] = False
         write_json_atomic(self.path, state)
         self.stopped = False
+
+    def abandon_uncertain_request(self, **record):
+        """Keep an unanswered reservation visible, then allow the next page attempt."""
+        state = json.loads(self.path.read_text(encoding='utf-8'))
+        if not state['budget']['pending_request']:
+            raise ValueError('No pending request to abandon')
+        state.setdefault('abandoned_uncertain_requests', []).append(dict(
+            record, requests=self.requests, recorded_at=utcnow().isoformat()))
+        state['budget']['pending_request'] = False
+        write_json_atomic(self.path, state)
 
 
 def cycle_evidence(path, *, as_of=None):

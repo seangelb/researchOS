@@ -1,7 +1,7 @@
 {
-  "format": "carvana-full-inventory-v2",
+  "format": "carvana-full-inventory-v3",
   "endpoint": "https://apik.carvana.io/merch/search/api/v2/search",
-  "intent": "Discover all-year inventory, validate exact-year and outside-tail contexts, then enumerate every positive make/model/year partition with explicit gaps; not a sales census.",
+  "intent": "Discover all-year inventory, then enumerate make/year cells directly up to 480 vehicles and split only larger cells. Not a sales census.",
   "authorization_basis": "User requested successful full public-website inventory runs and a 7000-request/six-hour ceiling per fresh attempt. Page-level schema, pagination, identity and transport failures may retry inside that ceiling. HTTP 403, 429 and Cloudflare challenges stay fatal and do not authorize retries after access failures.",
   "timezone": "America/New_York",
   "primary_zip": "08542",
@@ -17,17 +17,32 @@
   "minimum_spacing_seconds": 3,
   "retry_policy": {
     "attempts_per_day": 3,
-    "spacing_seconds_by_attempt": [3, 5, 8],
-    "cooldown_minutes_after_access_stop": [45, 120, 240],
-    "cooldown_minutes_after_degraded": [20, 60, 120],
-    "retry_backoff_seconds": [10, 30],
+    "spacing_seconds_by_attempt": [
+      3,
+      5,
+      8
+    ],
+    "cooldown_minutes_after_access_stop": [
+      45,
+      120,
+      240
+    ],
+    "cooldown_minutes_after_degraded": [
+      20,
+      60,
+      120
+    ],
+    "retry_backoff_seconds": [
+      10,
+      30
+    ],
     "consecutive_failure_breaker": 5
   },
   "max_requests": 7000,
   "page_retries": 2,
   "max_seconds": 21600,
-  "capture_root": "data/experiments/carvana_full_inventory_years_r4",
-  "partition_strategy": "year_then_make_model",
+  "capture_root": "data/experiments/carvana_full_inventory_years_r5",
+  "partition_strategy": "year_make_adaptive",
   "related_capture_roots": [
     "data/experiments/carvana_full_inventory",
     "data/experiments/carvana_full_inventory_years",
@@ -48,7 +63,8 @@
     "C:/Users/Sean/VscProjects/researchOS-gap-recovery/vehicle/data/experiments/carvana_gap_recovery",
     "C:/Users/Sean/VscProjects/researchOS-empty-page-fix/vehicle/data/experiments/carvana_gap_recovery_empty_fix",
     "C:/Users/Sean/VscProjects/researchOS-gap-diagnostic/vehicle/data/experiments/carvana_gap_facet_diagnostic",
-    "C:/Users/Sean/VscProjects/researchOS-gap-empty-context/vehicle/data/experiments/carvana_gap_empty_context"
+    "C:/Users/Sean/VscProjects/researchOS-gap-empty-context/vehicle/data/experiments/carvana_gap_empty_context",
+    "data/experiments/carvana_full_inventory_years_r4"
   ],
   "reviewed_peer_failures": [
     {
@@ -100,5 +116,8 @@
       "access_stop_sha256": "edd5db7ecf7e7c7dd2e227ff59924d42add4ad0e5d755bf45fb6debf64970ee5",
       "reason": "Nine charged requests, 21 retained VINs, then a zero-count model omitted from its applied make stopped the run. Retained with its stop marker."
     }
-  ]
+  ],
+  "split_threshold_vehicles": 480,
+  "max_unverified_share": 0.005,
+  "plan_estimate_requests": 4100
 }

@@ -63,6 +63,41 @@ def test_empty_missing_make_then_positive_child_exports_unknown_scope(experiment
     assert not pd.read_csv(output/'parent_coverage.csv').recovery_contexts_complete.any()
 
 
+def omit_requested_model(data):
+    """Reproduce the retained 2017 Audi A5 layout: applied make, no zero-count child."""
+    next(iter(data['facetData']['makes'].values()))['parentModels'] = []
+
+
+def test_zero_count_model_omitted_from_applied_make_continues_as_unverified(experiment, tmp_path):
+    e = experiment
+    def mutate(data):
+        if len(e.requests) == 1:
+            omit_requested_model(data)
+            e.mode = 'positive'
+    change_response(e, mutate)
+    report = run(e, limit=2)
+    first, second = report['entries'][:2]
+    assert report['status'] != 'stopped' or second['status'] != 'unattempted'
+    assert first['query_complete'] and not first['context_validated']
+    assert first['context_status'] == 'empty_model_context_unavailable'
+    assert first.get('outcome_kind') != 'schema_failure'
+    assert second['context_validated']
+    output = recovery.export_recovery(e.folder, output=tmp_path/'export')
+    children = pd.read_csv(output/'child_coverage.csv')
+    assert children.iloc[0].context_status == 'empty_model_context_unavailable'
+    assert not children.iloc[0].child_complete and children.iloc[0].observed_rows == 0
+    assert not pd.read_csv(output/'parent_coverage.csv').recovery_contexts_complete.any()
+
+
+def test_populated_response_missing_requested_model_still_stops(experiment, tmp_path):
+    e = experiment
+    change_response(e, omit_requested_model)
+    report = run(e, mode='positive')
+    assert len(e.requests) == 1 and report['status'] == 'stopped'
+    child = recovery.load(report['entries'][0]['report'])
+    assert child['outcome_kind'] == 'schema_failure' and child['pages'][0]['stored_rows'] == 0
+
+
 @pytest.mark.parametrize('bad', ['year', 'zip', 'make', 'model', 'nonzero', 'page', 'null_makes'])
 def test_incompatible_empty_context_stops_before_storage(experiment, tmp_path, bad):
     e = experiment

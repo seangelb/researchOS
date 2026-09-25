@@ -30,7 +30,7 @@ def _capture(path, expected_sha256):
     return capture, source
 
 
-def _context(capture, filters, zip_code):
+def _context(capture, filters, zip_code, *, allow_count_residual=False):
     if not isinstance(zip_code, str) or not re.fullmatch(r'\d{5}', zip_code):
         raise ValueError('Require an explicit five-digit ZIP')
     expected = build_search_request(filters=filters, zip_code=zip_code)
@@ -39,10 +39,14 @@ def _context(capture, filters, zip_code):
             or capture['zip_code'] != zip_code):
         raise ValueError('Year-discovery request or returned ZIP differs from the selected context')
     page = capture['pagination']
+    # Retained evidence shows both native empty conventions: zero inventory can
+    # report zero or one page. Keep the same rule the collector applies.
+    expected_pages = ((0, 1) if page.get('totalMatchedInventory') == 0
+                      else ((page['totalMatchedInventory']+23)//24,))
     if (any(type(page[key]) is not int or page[key] < 0 for key in
             ['currentPage', 'pageSize', 'totalMatchedInventory', 'totalMatchedPages'])
             or page['currentPage'] != 1 or page['pageSize'] != 24
-            or page['totalMatchedPages'] != (page['totalMatchedInventory']+23)//24):
+            or page['totalMatchedPages'] not in expected_pages):
         raise ValueError('Year discovery requires consistent native first-page pagination')
     bounds = filters.get('year', {})
     year = capture['facet_data']['year']
@@ -73,7 +77,8 @@ def _context(capture, filters, zip_code):
                     or not isinstance(child['modelIds'], list) or not child['modelIds']
                     or any(type(value) is not int or value < 0 for value in child['modelIds'])):
                 raise ValueError('Invalid native year-only model category')
-    if sum(bucket['count'] for bucket in makes.values()) != page['totalMatchedInventory']:
+    residual = sum(bucket['count'] for bucket in makes.values()) - page['totalMatchedInventory']
+    if residual != 0 and not allow_count_residual:
         raise ValueError('Native year-only make counts leave an unresolved residual')
     return page['totalMatchedInventory']
 
@@ -145,7 +150,7 @@ def _partition_bounds(partition):
     return copy.deepcopy(bounds)
 
 
-def year_make_candidates(facet_path, *, expected_sha256, partition):
+def year_make_candidates(facet_path, *, expected_sha256, partition, allow_count_residual=False):
     """Validate one retained year-only response and describe its native categories.
 
     Candidates are queries to consider, never inventory reports. Zero categories
@@ -161,7 +166,8 @@ def year_make_candidates(facet_path, *, expected_sha256, partition):
     """
     bounds = _partition_bounds(partition)
     capture, source = _capture(facet_path, expected_sha256)
-    total = _context(capture, {'year': bounds}, partition['zip_code'])
+    total = _context(capture, {'year': bounds}, partition['zip_code'],
+                     allow_count_residual=allow_count_residual)
     candidates, zeros = [], []
     for index, (make, bucket) in enumerate(sorted(capture['facet_data']['makes'].items())):
         record = dict(make=make, native_count=bucket['count'], source=copy.deepcopy(source),
@@ -171,8 +177,9 @@ def year_make_candidates(facet_path, *, expected_sha256, partition):
                       inventory_report=False)
         (candidates if bucket['count'] else zeros).append(record)
     tail = partition['kind'] in {'lower_tail', 'upper_tail'}
-    return dict(format='carvana-offline-year-make-candidates-v1',
+    discovered = dict(format='carvana-offline-year-make-candidates-v1',
                 partition=copy.deepcopy(partition), source=source,
+                native_make_categories_available=capture['facet_data'].get('makes_present') is not False,
                 observed_year_metadata=copy.deepcopy(capture['facet_data']['year']),
                 reported_total=total, native_make_count_sum=sum(c['native_count'] for c in candidates),
                 candidates=candidates, native_zero_categories=zeros,
@@ -181,3 +188,6 @@ def year_make_candidates(facet_path, *, expected_sha256, partition):
                 endpoint_run_page_provenance_bound=False,
                 inventory_coverage_complete=False, missing_or_noninteger_year_count=None,
                 limitation='Matched source bytes and context only; endpoint/run/page provenance requires authoritative journal reconciliation. Counts do not prove membership or account for missing years.')
+    if allow_count_residual:
+        discovered['count_residual'] = sum(bucket['count'] for bucket in capture['facet_data']['makes'].values()) - total
+    return discovered

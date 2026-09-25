@@ -123,6 +123,44 @@ def test_diagnostics_preserve_first_page_stop_and_zero_observations(tmp_path, st
     assert result['pages'][0]['response_evidence']['http_diagnostics']['http_status'] == status
 
 
+def test_server_failure_retries_after_backoff(tmp_path, response_data, monkeypatch):
+    sleeps = []
+    monkeypatch.setattr('vehicle_tracker.search.time.sleep', lambda seconds: sleeps.append(seconds))
+    body = json.dumps(response_data).encode()
+    calls = {'n': 0}
+
+    def post(url, **kwargs):
+        calls['n'] += 1
+        if calls['n'] == 1:
+            return reply(520, b'origin', {'Content-Type': 'text/plain'})
+        return reply(200, body, {'Content-Type': 'application/json'})
+
+    budget = NavigationBudget(max_requests=4, max_seconds=60)
+    result = collect_search(filters={}, zip_code='08542', destination=tmp_path/'query',
+                            budget=budget, post=post, page_retries=2, target_listings=1)
+    assert calls['n'] == 2 and result['query_complete']
+    assert result['pages'][0]['outcome_kind'] == 'server_failure'
+    assert 10 in sleeps
+
+
+def test_cloudflare_challenge_does_not_retry(tmp_path):
+    post = Mock(return_value=reply(520, b'challenge', {
+        'Content-Type': 'text/html', 'CF-Mitigated': 'challenge'}))
+    result = collect_search(filters={}, zip_code='08542', destination=tmp_path/'query',
+                            post=post, page_retries=2)
+    assert post.call_count == 1
+    assert result['outcome_kind'] == 'access_failure'
+    assert result['reason'] == 'cloudflare_challenge'
+
+
+def test_persistent_server_failure_stops_after_the_retry_allowance(tmp_path):
+    post = Mock(return_value=reply(520, b'origin', {'Content-Type': 'text/plain'}))
+    result = collect_search(filters={}, zip_code='08542', destination=tmp_path/'query',
+                            post=post, page_retries=2, retry_backoff_seconds=[0, 0])
+    assert post.call_count == 3
+    assert result['outcome_kind'] == 'server_failure' and result['status'] == 'blocked'
+
+
 def test_additive_diagnostics_leave_legacy_source_and_replay_compatible(tmp_path, response_data):
     content = json.dumps(response_data).encode()
     evidence = retain_response_evidence(

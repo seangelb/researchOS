@@ -22,7 +22,9 @@ The goal is complete only after:
    VIN/listing identities, collected SQLite, source clocks and exported tables.
 2. Opening and closing native counts, unknown/unclassified categories and ZIP
    differences are explicit. Additional categories or ZIP-only vehicles lead to
-   reviewed expansion of the next plan, not silent omission or mid-run retries.
+   reviewed expansion of the next plan, not silent omission. Page-level retries
+   stay inside the declared request ceiling; they do not invent a later date or
+   hide an isolated leaf.
 3. At least a second complete run demonstrates repeatability; a newly declared
    seven-date full-inventory operating trial retains all planned
    dates, including partial, failed and missed dates, and demonstrates reliability.
@@ -38,11 +40,17 @@ The goal is complete only after:
 ## Current implementation and limits
 
 The new [full-inventory workflow](full_inventory.md) discovers current makes and
-model families, includes all vehicle years, uses a single 6,000-request/six-hour
-budget and checks additional ZIP contexts. It is implemented and tested offline;
+model families, includes all vehicle years, uses a single 7,000-request/six-hour
+budget and checks additional ZIP contexts. Cells of at most 480 vehicles are
+collected whole. Larger cells are split. It is implemented and tested offline;
 a full live baseline and sustained reliability are separate acceptance milestones.
-Three-second sequential spacing, no automatic retry, and global fatal-error stops
-remain. The new budget is a ceiling, not a promise that every changing population fits.
+Three-second sequential spacing remains the clean-day pace. A day does not start
+when the estimated plan cannot fit the time left. Page-level schema, pagination,
+identity, transport and server failures (including HTTP 520) retry inside the
+ceiling, then isolate the leaf. HTTP 401, 403, 429 and Cloudflare challenges stay
+fatal. A finished plan whose unverified leaves are at most half of one percent
+of the opening count is a successful run with the gaps listed. The budget is a
+ceiling, not a promise that every changing population fits.
 
 Preserve the original 101-query trial, its original seven-date denominator, the
 failed facet experiment, all Tesla/status-study evidence and the frozen 32 VINs.

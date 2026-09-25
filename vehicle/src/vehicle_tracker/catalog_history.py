@@ -76,6 +76,9 @@ def read_catalog_history(export_directory, *, as_of):
     if len(leaf_ids) != len(set(leaf_ids)) or len(entries) != len(report['entries']):
         raise ValueError('Repeated catalog query identity')
     selected = [entries[key] for key in leaf_ids if key in entries and entries[key].get('report')]
+    if report.get('format') == 'carvana-full-inventory-run-v3':
+        selected.extend(entry for entry in report['entries']
+                        if entry.get('retry_of') in leaf_ids and entry.get('report'))
     if not selected:
         if database.exists():
             raise ValueError('Catalog without primary reports has an unexpected history database')
@@ -86,7 +89,10 @@ def read_catalog_history(export_directory, *, as_of):
     lookup = []
     for entry in selected:
         query = entry['query']
-        if (entry['role'] not in {'primary_inventory', 'make_discovery'}
+        allowed_roles = {'primary_inventory', 'make_discovery'}
+        if report.get('format') == 'carvana-full-inventory-run-v3':
+            allowed_roles.add('primary_inventory_retry')
+        if (entry['role'] not in allowed_roles
                 or query['zip_code'] != config['primary_zip']
                 or (entry['role'] == 'make_discovery' and not entry['query_complete'])):
             raise ValueError('Catalog primary selection contains discovery or geographic samples')

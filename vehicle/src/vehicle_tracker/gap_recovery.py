@@ -16,6 +16,7 @@ from vehicle_tracker.history import OBSERVATION_COLUMNS, import_reports, read_qu
 from vehicle_tracker.gap_failure_review import reviewed_empty_layout
 from vehicle_tracker.retained_history import _snapshot_witness
 from vehicle_tracker.search import ENDPOINT, _empty_first_page, build_search_request, collect_search, search_transport
+from vehicle_tracker.search_context import validate_first_page
 from vehicle_tracker.search_plan import validate_plan, verify_isolated_pagination
 from vehicle_tracker.storage import write_json_atomic
 
@@ -105,39 +106,23 @@ def settings(path):
 
 
 def validate_context(capture, facets, query):
-    """Validate native context; a known empty response may leave make scope unknown."""
-    request = build_search_request(filters=query['filters'], zip_code=query['zip_code'])
-    if (not same(capture['request'], request) or not same(facets['request'], request)
-            or capture['zip_code'] != query['zip_code'] or facets['zip_code'] != query['zip_code']
-            or facets['captured_at_utc'] != capture['captured_at_utc']
-            or not same(facets['pagination'], capture['pagination'])):
-        raise ValueError('Recovery first-page source context differs')
-    bounds, year = query['filters']['year'], facets['facet_data']['year']
-    for key, native in [('min', 'appliedMin'), ('max', 'appliedMax')]:
-        value = year.get(native)
-        if ((key in bounds and (type(value) is not int or value != bounds[key]))
-                or (key not in bounds and value is not None)):
-            raise ValueError('Recovery native applied year differs, including the open tail')
-    if facets['facet_data'].get('makes_present') is False:
-        if (facets['facet_data']['makes'] != {}
-                or not _empty_first_page(capture['pagination'], capture['vehicles'])):
-            raise ValueError('Unverified make context requires the exact empty first page')
-        return False
-    requested = query['filters']['makes']
-    if len(requested) != 1 or len(requested[0].get('parentModels', [])) > 1:
-        raise ValueError('Recovery requires one original make or make/model parent')
-    make = requested[0]['name']
-    requested_models = [m['name'] for m in requested[0].get('parentModels', [])]
-    makes = facets['facet_data']['makes']
-    applied = [name for name, bucket in makes.items() if bucket['isApplied'] is True]
-    if applied != [make]:
-        raise ValueError('Recovery native applied make differs')
-    models = [child['key'] for bucket in makes.values() for child in bucket['parentModels']
-              if child['isApplied'] is True]
-    if models != requested_models or any(not any(c['key'] == model and c['isApplied'] is True
-                                                for c in makes[make]['parentModels'])
-                                        for model in requested_models):
-        raise ValueError('Recovery native applied model differs')
+    """Validate native context; a known empty response may leave its scope unknown.
+
+    Returns True when validated, or the exact retained empty-layout status. The
+    original missing-make layout keeps its historical False result so previously
+    retained recovery reports still replay unchanged.
+    """
+    if 'year' not in query['filters'] or 'makes' not in query['filters']:
+        raise ValueError('Recovery requires an original make/model query with a year context')
+    outcome = validate_first_page(capture, facets, query)
+    return False if outcome == 'empty_make_context_unavailable' else outcome
+
+
+def context_status(outcome):
+    """Name one validation outcome using the retained report vocabulary."""
+    if isinstance(outcome, str):
+        return outcome
+    return 'validated' if outcome is not False else 'empty_make_context_unavailable'
 
 
 def _reviewed_empty_failure(config):
@@ -337,11 +322,12 @@ def _query_replay(entry, sources, *, window):
     run, captures, rows = read_query_evidence(path, diagnostic=True)
     sources[str(path)] = digest(path)
     starts, responses, reservations = [], [], 0
+    from vehicle_tracker.search import attempt_journal_name
     if {p.name for p in (path.parent/'attempts').glob('*.json')} != {
-            f"{page['page']:04d}.json" for page in report['pages']}:
+            attempt_journal_name(page) for page in report['pages']}:
         raise ValueError('Recovery has orphan or missing page journals')
     for page in report['pages']:
-        journal = path.parent/'attempts'/f"{page['page']:04d}.json"
+        journal = path.parent/'attempts'/attempt_journal_name(page)
         expected = dict(run_id=report['run_id'], request=build_search_request(filters=q['filters'],
             zip_code=q['zip_code'], page=page['page']), **page)
         if not same(load(journal), expected):
@@ -372,7 +358,7 @@ def _query_replay(entry, sources, *, window):
         evidence = page.get('response_evidence') or {}
         if evidence.get('source_path'):
             sources[evidence['source_path']] = evidence['source_sha256']
-    validated, context_status = False, 'unverified'
+    validated, status = False, 'unverified'
     if report['pages'] and report['pages'][0].get('facet_source'):
         first = report['pages'][0]
         from vehicle_tracker.facets import select_facets
@@ -382,15 +368,16 @@ def _query_replay(entry, sources, *, window):
                                                       allow_empty_missing_makes=True)):
             raise ValueError('Recovery facets differ from the retained public response')
         try:
-            validated = validate_context(load(first['retained_source']), facet, q) is not False
-            context_status = 'validated' if validated else 'empty_make_context_unavailable'
+            outcome = validate_context(load(first['retained_source']), facet, q)
+            validated = outcome is not False and not isinstance(outcome, str)
+            status = context_status(outcome)
         except ValueError:
             if first['status'] != 'failed' or first.get('outcome_kind') != 'schema_failure' or not rows.empty:
                 raise
     if (entry['context_validated'] is not validated
-            or entry['context_status'] != context_status
+            or entry['context_status'] != status
             or report.get('first_page_context_validated', False) is not validated
-            or report.get('first_page_context_status', 'unverified') != context_status
+            or report.get('first_page_context_status', 'unverified') != status
             or (not rows.empty and not validated)):
         raise ValueError('Recovery native context validation differs on replay')
     database = path.parent/'vehicle.sqlite'

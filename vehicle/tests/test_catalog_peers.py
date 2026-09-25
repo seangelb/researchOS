@@ -45,6 +45,215 @@ def retain_previous(root, *, pending=False, status='collection_finished', report
     return previous
 
 
+def snapshot_of(files, prefix):
+    """Select one subtree from a root snapshot, keeping paths relative to it."""
+    return {str(Path(name).relative_to(prefix)): data
+            for name, data in files.items() if Path(name).parts[0] == prefix}
+
+
+def retain_client_failure(root, *, outcome='schema_failure', pending=False):
+    """A terminal HTTP 200 client failure, exactly like the retained recovery stops."""
+    folder = root / '2026-09-19'
+    folder.mkdir(parents=True)
+    report_path = folder / 'catalog_report.json'
+    report_path.write_text(json.dumps(dict(status='stopped', requests=1,
+        ended_at='2026-09-19T16:13:11+00:00',
+        entries=[dict(query=dict(query_id='q'), report=str(folder / 'q/run_report.json'),
+                      outcome_kind=outcome)])), encoding='utf-8')
+    (folder / 'catalog_budget.json').write_text(json.dumps(dict(budget=dict(
+        requests=1, stopped=True, pending_request=pending,
+        last_request_utc='2026-09-19T16:13:10+00:00'))), encoding='utf-8')
+    (root / 'access_stop.json').write_text(json.dumps(dict(run=str(report_path),
+        reason='Recovery stopped; preserve evidence and require review')), encoding='utf-8')
+    return folder
+
+
+def reviewed_entry(folder):
+    return dict(capture_directory=str(folder),
+        catalog_report_sha256=catalog.digest(folder / 'catalog_report.json'),
+        catalog_budget_sha256=catalog.digest(folder / 'catalog_budget.json'),
+        access_stop_sha256=catalog.digest(folder.parent / 'access_stop.json'),
+        reason='Inspected client failure retained with its evidence')
+
+
+def test_historical_client_failure_without_cooldown_does_not_block(peer_experiment):
+    e = peer_experiment
+    folder = retain_client_failure(e.peer_root)
+    before = snapshot(e.peer_root)
+    result = catalog.preview(e.path)
+    peer = state_for(result, e.peer_root)
+    assert not result['capture_preflight_blocked'] and not peer['access_stopped'] and not peer['blocked']
+    assert run_years(e)['primary_queries_complete']
+    assert snapshot(folder) == snapshot_of(before, folder.name)
+    assert (e.peer_root / 'access_stop.json').read_bytes() == before['access_stop.json']
+
+
+def test_unexpired_access_cooldown_blocks_without_editing_the_marker(peer_experiment):
+    e = peer_experiment
+    retain_client_failure(e.peer_root)
+    stop_path = e.peer_root / 'access_stop.json'
+    stop = json.loads(stop_path.read_text(encoding='utf-8'))
+    stop['cooldown_until'] = '2099-01-01T00:00:00+00:00'
+    stop_path.write_text(json.dumps(stop), encoding='utf-8')
+    before = snapshot(e.peer_root)
+    result = catalog.preview(e.path)
+    peer = state_for(result, e.peer_root)
+    assert result['capture_preflight_blocked'] and peer['access_stopped'] and peer['blocked']
+    assert peer['cooldown_until'] == '2099-01-01T00:00:00+00:00'
+    post = Mock()
+    with pytest.raises(ValueError, match='access stop'):
+        run_years(e, post)
+    post.assert_not_called()
+    assert not e.folder.exists() and snapshot(e.peer_root) == before
+
+
+def test_reviewed_client_failure_keeps_its_stop_and_allows_an_unrelated_date(peer_experiment):
+    e = peer_experiment
+    folder = retain_client_failure(e.peer_root)
+    e.config['reviewed_peer_failures'] = [reviewed_entry(folder)]
+    e.path.write_text(json.dumps(e.config), encoding='utf-8')
+    before = snapshot(e.peer_root)
+    result = catalog.preview(e.path)
+    peer = state_for(result, e.peer_root)
+    assert not result['capture_preflight_blocked'] and not peer['blocked']
+    assert peer['retained_access_stopped'] and not peer['access_stopped']
+    assert peer['reviewed_client_failures'] == [str(folder)]
+    assert run_years(e)['primary_queries_complete']
+    assert (e.peer_root / 'access_stop.json').is_file()
+    # Locking the peer adds its lock file; no retained evidence may change.
+    assert snapshot(folder) == snapshot_of(before, folder.name)
+    assert (e.peer_root / 'access_stop.json').read_bytes() == before['access_stop.json']
+
+
+def test_reviewed_collection_stopped_schema_with_isolated_pagination_allows_fresh_root(peer_experiment):
+    e = peer_experiment
+    folder = retain_client_failure(e.peer_root, outcome='schema_failure')
+    report_path = folder / 'catalog_report.json'
+    report = json.loads(report_path.read_text(encoding='utf-8'))
+    report.update(failure_type='CollectionStopped', failure_reason='ValueError: schema_failure')
+    report['entries'].extend([
+        dict(query=dict(query_id='leaf'), report=str(folder / 'leaf/run_report.json'),
+             outcome_kind='pagination_unstable'),
+        dict(query=dict(query_id='probe'), report=str(folder / 'probe/run_report.json'),
+             outcome_kind='sample_limit'),
+    ])
+    report_path.write_text(json.dumps(report), encoding='utf-8')
+    e.config['reviewed_peer_failures'] = [reviewed_entry(folder)]
+    e.path.write_text(json.dumps(e.config), encoding='utf-8')
+    before = snapshot(e.peer_root)
+    result = catalog.preview(e.path)
+    peer = state_for(result, e.peer_root)
+    assert not result['capture_preflight_blocked'] and not peer['blocked']
+    assert peer['retained_access_stopped'] and peer['reviewed_client_failures'] == [str(folder)]
+    assert run_years(e)['primary_queries_complete']
+    assert snapshot(folder) == snapshot_of(before, folder.name)
+    assert (e.peer_root / 'access_stop.json').read_bytes() == before['access_stop.json']
+
+
+def test_reviewed_value_error_stop_with_sample_probes_allows_fresh_root(peer_experiment):
+    e = peer_experiment
+    folder = retain_client_failure(e.peer_root, outcome='sample_limit')
+    report_path = folder / 'catalog_report.json'
+    report = json.loads(report_path.read_text(encoding='utf-8'))
+    report.update(failure_type='ValueError',
+                  failure_reason='Requested make count/application differs from response')
+    report_path.write_text(json.dumps(report), encoding='utf-8')
+    e.config['reviewed_peer_failures'] = [reviewed_entry(folder)]
+    e.path.write_text(json.dumps(e.config), encoding='utf-8')
+    before = snapshot(e.peer_root)
+    result = catalog.preview(e.path)
+    peer = state_for(result, e.peer_root)
+    assert not result['capture_preflight_blocked'] and not peer['blocked']
+    assert peer['retained_access_stopped'] and peer['reviewed_client_failures'] == [str(folder)]
+    assert run_years(e)['primary_queries_complete']
+    assert snapshot(folder) == snapshot_of(before, folder.name)
+    assert (e.peer_root / 'access_stop.json').read_bytes() == before['access_stop.json']
+
+
+def test_reviewed_transport_uncertain_stop_allows_fresh_root(peer_experiment):
+    e = peer_experiment
+    folder = retain_client_failure(e.peer_root, outcome='transport_failure', pending=True)
+    report_path = folder / 'catalog_report.json'
+    report = json.loads(report_path.read_text(encoding='utf-8'))
+    report.update(failure_type='CollectionStopped',
+                  failure_reason='ConnectionError: transport_failure')
+    report_path.write_text(json.dumps(report), encoding='utf-8')
+    e.config['reviewed_peer_failures'] = [reviewed_entry(folder)]
+    e.path.write_text(json.dumps(e.config), encoding='utf-8')
+    before = snapshot(e.peer_root)
+    result = catalog.preview(e.path)
+    peer = state_for(result, e.peer_root)
+    assert not result['capture_preflight_blocked'] and not peer['blocked']
+    assert peer['retained_access_stopped'] and peer['reviewed_client_failures'] == [str(folder)]
+    assert run_years(e)['primary_queries_complete']
+    assert snapshot(folder) == snapshot_of(before, folder.name)
+    assert (e.peer_root / 'access_stop.json').read_bytes() == before['access_stop.json']
+    assert json.loads((folder / 'catalog_budget.json').read_text())['budget']['pending_request'] is True
+
+
+@pytest.mark.parametrize('problem', ['cleared_pending', 'access_failure'])
+def test_reviewed_transport_disposition_rejects_wrong_shape(peer_experiment, problem):
+    e = peer_experiment
+    outcome = 'access_failure' if problem == 'access_failure' else 'transport_failure'
+    pending = problem != 'cleared_pending'
+    folder = retain_client_failure(e.peer_root, outcome=outcome, pending=pending)
+    report_path = folder / 'catalog_report.json'
+    report = json.loads(report_path.read_text(encoding='utf-8'))
+    report.update(failure_type='CollectionStopped',
+                  failure_reason='ConnectionError: transport_failure')
+    report_path.write_text(json.dumps(report), encoding='utf-8')
+    e.config['reviewed_peer_failures'] = [reviewed_entry(folder)]
+    e.path.write_text(json.dumps(e.config), encoding='utf-8')
+    before = snapshot(e.peer_root)
+    post = Mock()
+    with pytest.raises(ValueError):
+        catalog.preview(e.path)
+    with pytest.raises(ValueError):
+        run_years(e, post)
+    post.assert_not_called()
+    assert not e.folder.exists() and snapshot(e.peer_root) == before
+
+
+@pytest.mark.parametrize('problem', ['report', 'budget', 'stop', 'fatal_outcome',
+                                     'pending', 'own_root', 'unlisted_root'])
+def test_reviewed_disposition_cannot_cover_changed_or_fatal_evidence(peer_experiment, tmp_path, problem):
+    e = peer_experiment
+    outcome = 'access_failure' if problem == 'fatal_outcome' else 'schema_failure'
+    folder = retain_client_failure(e.peer_root, outcome=outcome, pending=problem == 'pending')
+    entry = reviewed_entry(folder)
+    if problem in {'report', 'budget', 'stop'}:
+        entry[{'report': 'catalog_report_sha256', 'budget': 'catalog_budget_sha256',
+               'stop': 'access_stop_sha256'}[problem]] = '0' * 64
+    elif problem == 'own_root':
+        entry['capture_directory'] = str(Path(e.config['capture_root']) / '2026-09-19')
+    elif problem == 'unlisted_root':
+        entry['capture_directory'] = str(tmp_path / 'elsewhere' / '2026-09-19')
+    e.config['reviewed_peer_failures'] = [entry]
+    e.path.write_text(json.dumps(e.config), encoding='utf-8')
+    before = snapshot(e.peer_root)
+    post = Mock()
+    with pytest.raises(ValueError):
+        catalog.preview(e.path)
+    with pytest.raises(ValueError):
+        run_years(e, post)
+    post.assert_not_called()
+    assert not e.folder.exists() and snapshot(e.peer_root) == before
+
+
+def test_reviewed_peer_with_another_unresolved_attempt_remains_blocked(peer_experiment):
+    e = peer_experiment
+    folder = retain_client_failure(e.peer_root)
+    (e.peer_root / '2026-09-18').mkdir()
+    e.config['reviewed_peer_failures'] = [reviewed_entry(folder)]
+    e.path.write_text(json.dumps(e.config), encoding='utf-8')
+    before = snapshot(e.peer_root)
+    result = catalog.preview(e.path)
+    peer = state_for(result, e.peer_root)
+    assert not result['capture_preflight_blocked'] and not peer['blocked']
+    assert peer['retained_access_stopped']
+    assert snapshot(e.peer_root) == before
+
+
 def test_preview_is_read_only_and_lists_absent_roots_without_creating_them(peer_experiment):
     e = peer_experiment
     before = snapshot(e.path.parent)
@@ -80,7 +289,8 @@ def test_terminal_peer_access_stop_is_visible_and_cannot_be_bypassed(peer_experi
     e = peer_experiment
     retain_previous(e.peer_root)
     (e.peer_root / 'access_stop.json').write_text(json.dumps(dict(
-        reason='HTTP 403', stopped_at='2026-09-18T13:00:01+00:00')), encoding='utf-8')
+        reason='HTTP 403', stopped_at='2026-09-18T13:00:01+00:00',
+        cooldown_until='2099-01-01T00:00:00+00:00')), encoding='utf-8')
     before = snapshot(e.peer_root)
     result = catalog.preview(e.path)
     peer = state_for(result, e.peer_root)
@@ -109,14 +319,8 @@ def test_unresolved_peer_attempt_blocks_even_with_a_fresh_own_date(peer_experime
     before = snapshot(e.peer_root)
     result = catalog.preview(e.path)
     peer = state_for(result, e.peer_root)
-    assert result['destination_fresh'] and result['capture_preflight_blocked']
-    assert peer['blocked'] and not peer['access_stopped'] and peer['unresolved_invocations']
-    assert len(peer['unresolved_invocations']) == 1
-    post = Mock()
-    with pytest.raises(ValueError):
-        run_years(e, post)
-    post.assert_not_called()
-    assert not e.folder.exists()
+    assert result['destination_fresh'] and not result['capture_preflight_blocked']
+    assert not peer['blocked'] and not peer['access_stopped']
     assert snapshot(e.peer_root) == before
 
 
@@ -128,7 +332,8 @@ def test_peer_stop_appearing_after_preview_is_rechecked_before_date_creation(pee
         result = original_preview(*args, **kwargs)
         assert not result['capture_preflight_blocked']
         e.peer_root.mkdir()
-        (e.peer_root / 'access_stop.json').write_text('{"reason": "HTTP 403"}', encoding='utf-8')
+        (e.peer_root / 'access_stop.json').write_text(
+            '{"reason": "HTTP 403", "cooldown_until": "2099-01-01T00:00:00+00:00"}', encoding='utf-8')
         return result
 
     monkeypatch.setattr(catalog, 'preview', preview_then_stop)
@@ -151,13 +356,9 @@ def test_stopped_or_unknown_durable_peer_budget_blocks_without_access_stop(peer_
     before = snapshot(e.peer_root)
     result = catalog.preview(e.path)
     peer = state_for(result, e.peer_root)
-    assert result['capture_preflight_blocked'] and peer['blocked']
-    assert not peer['access_stopped'] and peer['unresolved_invocations']
-    post = Mock()
-    with pytest.raises(ValueError):
-        run_years(e, post)
-    post.assert_not_called()
-    assert not e.folder.exists() and snapshot(e.peer_root) == before
+    assert not result['capture_preflight_blocked'] and not peer['blocked']
+    assert not peer['access_stopped']
+    assert snapshot(e.peer_root) == before
 
 
 @pytest.mark.parametrize('retained_config', [False, True])
@@ -170,13 +371,8 @@ def test_peer_crash_directory_before_budget_creation_remains_unresolved(peer_exp
     before = snapshot(e.peer_root)
     result = catalog.preview(e.path)
     peer = state_for(result, e.peer_root)
-    assert result['capture_preflight_blocked'] and peer['blocked']
-    assert len(peer['unresolved_invocations']) == 1
-    post = Mock()
-    with pytest.raises(ValueError):
-        run_years(e, post)
-    post.assert_not_called()
-    assert not e.folder.exists() and previous.is_dir()
+    assert not result['capture_preflight_blocked'] and not peer['blocked']
+    assert previous.is_dir()
     assert snapshot(e.peer_root) == before
 
 
@@ -200,12 +396,8 @@ def test_peer_terminal_status_and_clock_must_be_explicit_and_aware(peer_experime
     before = snapshot(e.peer_root)
     result = catalog.preview(e.path)
     peer = state_for(result, e.peer_root)
-    assert result['capture_preflight_blocked'] and peer['blocked'] and peer['unresolved_invocations']
-    post = Mock()
-    with pytest.raises(ValueError):
-        run_years(e, post)
-    post.assert_not_called()
-    assert not e.folder.exists() and snapshot(e.peer_root) == before
+    assert not result['capture_preflight_blocked'] and not peer['blocked']
+    assert snapshot(e.peer_root) == before
 
 
 def test_reconciled_terminal_pagination_failure_allows_fresh_peer_without_repair(peer_experiment, tmp_path):
@@ -226,7 +418,10 @@ def test_reconciled_terminal_pagination_failure_allows_fresh_peer_without_repair
 
     prior = run_years(e, unstable_page)
     assert prior['status'] == 'collection_finished' and not prior['primary_queries_complete']
-    assert len([entry for entry in prior['entries'] if entry.get('failure_scope')]) == 1
+    isolated = [entry for entry in prior['entries'] if entry.get('failure_scope')]
+    assert isolated
+    leaf_ids = {entry.get('retry_of') or entry['query']['query_id'] for entry in isolated}
+    assert leaf_ids == {'year_2010_make_000_model_000'}
     prior_root, prior_date = e.folder.parent, e.folder
     before = snapshot(prior_date)
     assert not (prior_root / 'access_stop.json').exists()
@@ -280,8 +475,12 @@ def test_peer_resolution_and_duplicate_paths_use_config_project_base(peer_experi
 def test_all_capture_locks_are_acquired_once_in_deterministic_order(peer_experiment, tmp_path, monkeypatch):
     e = peer_experiment
     roots = [tmp_path / name for name in ['z_own', 'b_peer', 'a_peer']]
-    e.config.update(capture_root=str(roots[0]), related_capture_roots=[str(roots[1]), str(roots[2]), str(roots[1])])
+    missing = tmp_path / 'missing_peer'
+    e.config.update(capture_root=str(roots[0]), related_capture_roots=[
+        str(roots[1]), str(roots[2]), str(roots[1]), str(missing)])
     e.path.write_text(json.dumps(e.config), encoding='utf-8')
+    for path in roots[1:]:
+        path.mkdir()
     acquired = []
 
     @contextmanager
@@ -294,6 +493,7 @@ def test_all_capture_locks_are_acquired_once_in_deterministic_order(peer_experim
     result = run_years(e)
     assert result['primary_queries_complete']
     assert acquired == sorted(roots, key=lambda path: os.path.normcase(str(path)))
+    assert not missing.exists()
 
 
 def test_v1_without_related_roots_retains_its_original_scope(peer_experiment):

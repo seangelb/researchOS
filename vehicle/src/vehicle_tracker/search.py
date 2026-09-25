@@ -20,6 +20,46 @@ ENDPOINT = 'https://apik.carvana.io/merch/search/api/v2/search'
 FIELDS = ('vehicleId', 'vin', 'year', 'make', 'model', 'parentModel', 'mileage',
           'isPurchasePending', 'vehicleLockType', 'vehiclePurchaseType',
           'vehicleInventoryType', 'isOnDemand', 'transportCost')
+RETRYABLE_STAGES = frozenset({
+    'schema_failure', 'pagination_unstable', 'identity_failure', 'transport_failure',
+    'server_failure'})
+ACCESS_FAILURE_MARKERS = (
+    'rate_limited', 'cloudflare_challenge', 'http_access_failure', 'unexpected_content')
+DEFAULT_RETRY_BACKOFF_SECONDS = (10, 30)
+
+
+def server_status(status):
+    """Transient origin/edge failures. 401/403, 429 and challenges stay access stops."""
+    return type(status) is int and (status == 408 or 500 <= status <= 599)
+DEFAULT_PAGE_RETRIES = 2
+
+
+def attempt_journal_name(page):
+    """Prefer the unique per-attempt journal; older reports used the page number only."""
+    return page.get('attempt_journal') or f"{int(page['page']):04d}.json"
+
+
+def overlap_siblings(facet_data, filters):
+    """Parent-model names that share a native model id with the requested model.
+
+    The leaf's own page-1 facet is the retained source. A wrong make, a wrong
+    year, or a parent model outside this cluster remains a filter violation.
+    """
+    makes = filters.get('makes') or []
+    if len(makes) != 1:
+        return ()
+    requested = makes[0].get('parentModels') or []
+    if len(requested) != 1:
+        return ()
+    wanted, make = requested[0]['name'], makes[0]['name']
+    children = ((facet_data or {}).get('makes') or {}).get(make, {}).get('parentModels') or []
+    ids = next((set(child.get('modelIds') or []) for child in children
+                if str(child.get('key', '')).casefold() == wanted.casefold()), set())
+    if not ids:
+        return ()
+    return tuple(child['key'] for child in children
+                 if str(child.get('key', '')).casefold() != wanted.casefold()
+                 and ids & set(child.get('modelIds') or []))
 
 
 def build_search_request(*, filters, zip_code, page=1, location_filter=False):
@@ -91,13 +131,25 @@ def project_response(data, request, *, observed_at):
                 vehicles=vehicles, reported_total_text=str(pagination['totalMatchedInventory']) + ' cars')
 
 
-def parse_search_capture(capture):
-    """Normalize public inventory into the existing observation columns."""
+def parse_search_capture(capture, *, overlap_siblings=None):
+    """Normalize public inventory into the existing observation columns.
+
+    ``overlap_siblings`` names come from the leaf's retained page-1 facet. The
+    same list is stored on the capture as ``overlap_parent_models`` so replay
+    and ``store_capture`` admit the identical sibling rows.
+    """
     if capture['endpoint'] != ENDPOINT or capture['pagination']['currentPage'] != capture['request']['pagination']['page']:
         raise ValueError('Unexpected source or pagination')
     if capture.get('zip_code') != capture['requested_zip']:
         raise ValueError('Returned ZIP differs from requested context or is missing')
     _validate_pagination(capture['pagination'], capture['request'], capture['vehicles'])
+    recorded = tuple(capture.get('overlap_parent_models') or ())
+    if overlap_siblings is None:
+        overlap_siblings = recorded
+    else:
+        overlap_siblings = tuple(overlap_siblings)
+        if recorded and overlap_siblings != recorded:
+            raise ValueError('Overlap siblings differ from retained capture')
     if capture['pagination']['totalMatchedInventory'] == 0:
         return pd.DataFrame(columns=['retailer', 'listing_id', 'vin', 'observed_at_utc',
             'year', 'make', 'model', 'mileage_miles', 'asking_price_usd', 'condition_native',
@@ -118,12 +170,19 @@ def parse_search_capture(capture):
         raise ValueError('Missing year prevents validation of requested year filters')
     if ('min' in year and (frame.year < year['min']).any()) or ('max' in year and (frame.year > year['max']).any()):
         raise ValueError('Returned model years violate requested filters')
+    extra = {name.casefold() for name in overlap_siblings}
     makes = filters.get('makes', [])
     if makes:
         for v in capture['vehicles']:
             matched = [m for m in makes if m['name'].casefold() == str(v.get('make')).casefold()]
-            if not matched or not any(not m.get('parentModels') or str(v.get('parentModel')).casefold() in
-                    {x['name'].casefold() for x in m['parentModels']} for m in matched):
+            allowed = False
+            for make in matched:
+                requested = make.get('parentModels') or []
+                names = {item['name'].casefold() for item in requested} | extra
+                if not requested or str(v.get('parentModel')).casefold() in names:
+                    allowed = True
+                    break
+            if not matched or not allowed:
                 raise ValueError('Returned vehicle violates requested make/model filters')
     return frame
 
@@ -151,29 +210,48 @@ def search_transport(post=None):
 def collect_search(*, filters, zip_code, destination, target_listings=1000, budget=None, post=None,
                    location_filter=False, known_listing_ids=None, target_vins=None,
                    known_listing_vins=None, page_progress=None, retain_facets=False,
-                   first_page_validator=None, allow_empty_missing_makes=False):
+                   first_page_validator=None, allow_empty_missing_makes=False,
+                   page_retries=0, retry_backoff_seconds=None):
     """Collect one query into retained files, a page journal and a query database.
 
     A supplied budget is shared across queries; this function does not reset it.
     Earlier-query identities measure overlap without discarding this query's rows.
+    Page-level schema, pagination, identity, transport and server failures
+    re-request the same page up to ``page_retries`` extra times. Server failures
+    wait ``retry_backoff_seconds`` before each extra attempt. HTTP 401/403, 429
+    and Cloudflare challenges stay fatal to the attempt. Every attempt charges
+    a request.
     """
     if first_page_validator is not None and (not callable(first_page_validator) or not retain_facets):
         raise ValueError('First-page validation requires retained facets and a callable')
     if (type(allow_empty_missing_makes) is not bool or (allow_empty_missing_makes
             and (not retain_facets or not callable(first_page_validator)))):
         raise ValueError('Unverified empty make context requires explicit facet retention and validation')
+    if type(page_retries) is not int or not 0 <= page_retries <= 5:
+        raise ValueError('page_retries must be an integer from 0 through 5')
+    backoff = _retry_backoff(retry_backoff_seconds)
     with search_transport(post) as send:
         return _collect_search(filters=filters, zip_code=zip_code, destination=destination,
             target_listings=target_listings, budget=budget, post=send,
             location_filter=location_filter, known_listing_ids=known_listing_ids,
             target_vins=target_vins, known_listing_vins=known_listing_vins,
             page_progress=page_progress, retain_facets=retain_facets,
-            first_page_validator=first_page_validator, allow_empty_missing_makes=allow_empty_missing_makes)
+            first_page_validator=first_page_validator, allow_empty_missing_makes=allow_empty_missing_makes,
+            page_retries=page_retries, retry_backoff_seconds=backoff)
+
+
+def _retry_backoff(retry_backoff_seconds):
+    delays = DEFAULT_RETRY_BACKOFF_SECONDS if retry_backoff_seconds is None else tuple(retry_backoff_seconds)
+    if (not delays or any(type(item) not in (int, float) or isinstance(item, bool) or item < 0
+                          for item in delays)):
+        raise ValueError('retry_backoff_seconds must be positive waits, including zero')
+    return delays
 
 
 def _collect_search(*, filters, zip_code, destination, target_listings, budget, post,
                     location_filter, known_listing_ids, target_vins, known_listing_vins,
-                    page_progress, retain_facets, first_page_validator, allow_empty_missing_makes):
+                    page_progress, retain_facets, first_page_validator, allow_empty_missing_makes,
+                    page_retries, retry_backoff_seconds):
     """Advance each page from reservation through retention to parsed storage.
 
     ``stage`` identifies the operation whose failure stopped collection. Keep the
@@ -215,6 +293,7 @@ def _collect_search(*, filters, zip_code, destination, target_listings, budget, 
         for name in ('search.py', 'search_evidence.py', 'carvana.py', 'history.py')}
     total = pages_total = None
     number = 1
+    page_attempts, siblings, selected = {}, (), None
 
     def checkpoint(entry=None):
         report.update(unique_listings=len(query_listing_ids), unique_vins=len(query_vins), reported_total=total,
@@ -223,21 +302,27 @@ def _collect_search(*, filters, zip_code, destination, target_listings, budget, 
             target_reached=target_listings is not None and len(query_listing_ids - earlier_listing_ids) >= target_listings,
             new_unique_vins=len(query_vins - earlier_vins),
             requests=budget.requests-start_requests, elapsed_seconds=time.monotonic()-started,
-            ended_utc=datetime.now(timezone.utc).isoformat())
+            ended_utc=datetime.now(timezone.utc).isoformat(),
+            retry_attempts=sum(max(0, count - 1) for count in page_attempts.values()))
         if target_vins is not None:
             report['target_reached'] = len(query_vins - earlier_vins) >= target_vins
         if entry is not None:
-            write_json_atomic(destination/'attempts'/f"{entry['page']:04d}.json",
+            write_json_atomic(destination/'attempts'/attempt_journal_name(entry),
                 dict(run_id=run_id, request=request, **entry))
         write_json_atomic(destination/'run_report.json', report)
 
     checkpoint()
     while True:
+        attempt_n = page_attempts.get(number, 0) + 1
+        page_attempts[number] = attempt_n
         request = build_search_request(filters=filters, zip_code=zip_code, page=number,
                                        location_filter=location_filter)
         entry = dict(page=number, attempt_id=uuid4().hex, status='pending', stored_rows=0,
             outcome_kind='unattempted', request_started_at_utc=None, response_received_at_utc=None,
-            evidence_available_at_utc=None)
+            evidence_available_at_utc=None, page_attempt=attempt_n,
+            attempt_journal=(f'{number:04d}.json' if attempt_n == 1
+                             else f'{number:04d}_{attempt_n:02d}.json'),
+            retry_attempts=attempt_n - 1)
         capture = dict(page_url='https://www.carvana.com/cars', captured_at_utc=None,
             request=request, capture_method='failed_search', records=[], attempt_id=entry['attempt_id'])
         report['pages'].append(entry)
@@ -270,14 +355,20 @@ def _collect_search(*, filters, zip_code, destination, target_listings, budget, 
             checkpoint(entry)  # Source is durable before projection is attempted.
             budget.response_received()
             headers = response.headers
-            stage = 'access_failure'
-            if response.status_code == 429:
+            status = response.status_code
+            if status == 429:
+                stage = 'access_failure'
                 retry = headers.get('retry-after', '')
                 entry['retry_after_seconds'] = int(retry) if str(retry).isdigit() else None
                 raise CollectionStopped('rate_limited; no automatic retries')
             if headers.get('cf-mitigated') == 'challenge':
+                stage = 'access_failure'
                 raise CollectionStopped('cloudflare_challenge')
-            if response.status_code != 200:
+            if server_status(status):
+                stage = 'server_failure'
+                raise CollectionStopped('server_failure')
+            if status != 200:
+                stage = 'access_failure'
                 raise CollectionStopped('http_access_failure')
             if 'application/json' not in headers.get('content-type', ''):
                 raise CollectionStopped('unexpected_content')
@@ -293,10 +384,13 @@ def _collect_search(*, filters, zip_code, destination, target_listings, budget, 
                 selected = dict(request=request, captured_at_utc=stamp,
                     zip_code=capture['zip_code'], pagination=capture['pagination'],
                     facet_data=select_facets(source, allow_empty_missing_makes=allow_empty_missing_makes))
+                siblings = overlap_siblings(selected['facet_data'], filters)
                 stage = 'storage_failure'
                 facet_path = retain_capture(selected, destination/'facets')
                 entry.update(facet_source=str(facet_path),
                     facet_sha256=hashlib.sha256(facet_path.read_bytes()).hexdigest())
+            if siblings:
+                capture['overlap_parent_models'] = list(siblings)
             stage = 'storage_failure'
             capture_path = retain_capture(capture, destination/'raw')
             entry.update(retained_source=str(capture_path), source_sha256=hashlib.sha256(capture_path.read_bytes()).hexdigest(),
@@ -305,14 +399,24 @@ def _collect_search(*, filters, zip_code, destination, target_listings, budget, 
             checkpoint(entry)  # Retention and the SQLite commit are separate steps.
             if number == 1 and first_page_validator is not None:
                 stage = 'schema_failure'
-                validated = first_page_validator(capture, selected) is not False
-                if not validated and not (allow_empty_missing_makes
-                        and _empty_first_page(capture['pagination'], capture['vehicles'])
-                        and selected['facet_data'].get('makes_present') is False
-                        and selected['facet_data']['makes'] == {}):
-                    raise ValueError('Only the explicit missing-make empty response may remain unverified')
+                outcome = first_page_validator(capture, selected)
+                empty = _empty_first_page(capture['pagination'], capture['vehicles'])
+                if isinstance(outcome, str):
+                    # A named status describes a retained empty layout whose
+                    # requested context is unknown, never a populated response.
+                    from vehicle_tracker.search_context import UNVERIFIED_EMPTY_STATUSES
+                    if not (allow_empty_missing_makes and empty and outcome in UNVERIFIED_EMPTY_STATUSES):
+                        raise CollectionStopped('An unverified context status requires the exact empty first page')
+                    validated, status = False, outcome
+                else:
+                    validated = outcome is not False
+                    if not validated and not (allow_empty_missing_makes and empty
+                            and selected['facet_data'].get('makes_present') is False
+                            and selected['facet_data']['makes'] == {}):
+                        raise CollectionStopped('Only the explicit missing-make empty response may remain unverified')
+                    status = 'validated' if validated else 'empty_make_context_unavailable'
                 report['first_page_context_validated'] = validated
-                report['first_page_context_status'] = ('validated' if validated else 'empty_make_context_unavailable')
+                report['first_page_context_status'] = status
             stage = 'pagination_unstable'
             raw_ids = [v['vehicleId'] for v in capture['vehicles']]
             raw_vins = [v.get('vin') for v in capture['vehicles']]
@@ -367,12 +471,41 @@ def _collect_search(*, filters, zip_code, destination, target_listings, budget, 
         except BaseException as exc:
             if not isinstance(exc, Exception):
                 interrupted = exc
-            # Every unresolved source, identity, pagination or write failure ends
-            # this shared invocation; another query must not hide the failure.
-            budget.stop()
-            reason = str(exc) if isinstance(exc, CollectionStopped) else f'{type(exc).__name__}: {stage}'
-            report.update(status='blocked', reason=reason, outcome_kind=stage, query_complete=False)
-            entry.update(error=reason, outcome_kind=stage)
+            if isinstance(exc, CollectionStopped):
+                reason = str(exc)
+            elif isinstance(exc, ValueError):
+                message = str(exc).strip()
+                reason = f'{type(exc).__name__}: {message}' if message else f'{type(exc).__name__}: {stage}'
+            else:
+                # Transport/OS errors keep the stage only; third-party text is not evidence.
+                reason = f'{type(exc).__name__}: {stage}'
+            access_failure = (stage == 'access_failure'
+                              or any(marker in reason for marker in ACCESS_FAILURE_MARKERS))
+            pending_uncertain = (stage == 'transport_failure'
+                                 and entry.get('response_received_at_utc') is None)
+            will_retry = (interrupted is None and not access_failure
+                          and stage in RETRYABLE_STAGES and attempt_n <= page_retries)
+            if pending_uncertain and interrupted is None and hasattr(budget, 'abandon_uncertain_request'):
+                budget.abandon_uncertain_request(
+                    query_run_id=run_id, page=number, attempt_id=entry['attempt_id'],
+                    stage=stage, reason=reason)
+            if will_retry:
+                report.update(reason=reason)
+                if stage == 'server_failure':
+                    delay = float(retry_backoff_seconds[min(attempt_n - 1, len(retry_backoff_seconds) - 1)])
+                    remaining = budget.max_seconds - (time.monotonic() - budget.started)
+                    if delay > 0 and remaining <= 0:
+                        will_retry = False
+                        budget.stop()
+                        report.update(status='blocked', reason=reason, outcome_kind=stage, query_complete=False)
+                    elif delay > 0:
+                        time.sleep(min(delay, remaining))
+            else:
+                # Access, storage, budget and exhausted retryable pages stop this query.
+                # The catalog isolates exhausted leaf failures so later leaves can run.
+                budget.stop()
+                report.update(status='blocked', reason=reason, outcome_kind=stage, query_complete=False)
+            entry.update(error=reason, outcome_kind=stage, failure_stage=stage)
             if isinstance(exc, OSError):
                 # Local filesystem diagnostics survive the safe, short reason.
                 # Do not record arbitrary transport exception messages or headers.
@@ -389,6 +522,16 @@ def _collect_search(*, filters, zip_code, destination, target_listings, budget, 
                 # A commit may already have happened. Never overwrite it as a failed
                 # capture; replay/idempotence checks or a new query attempt resolve it.
                 entry['database_outcome'] = 'unconfirmed'
+            elif will_retry:
+                entry['status'] = 'failed'
+                entry['database_outcome'] = 'deferred'
+                try:
+                    capture_path = capture_path or retain_capture(capture, destination/'raw')
+                    entry.update(retained_source=str(capture_path), source_sha256=hashlib.sha256(capture_path.read_bytes()).hexdigest(),
+                        source_hash_scope='SHA-256 of selected projection/failure JSON bytes',
+                        evidence_available_at_utc=datetime.now(timezone.utc).isoformat())
+                except Exception:
+                    entry['database_outcome'] = 'unconfirmed'
             else:
                 entry['status'] = 'failed'
                 try:
@@ -400,6 +543,7 @@ def _collect_search(*, filters, zip_code, destination, target_listings, budget, 
                 except Exception:
                     entry['database_outcome'] = 'unconfirmed'
                     report['outcome_kind'] = 'storage_failure'
+            report['retry_attempts'] = sum(max(0, count - 1) for count in page_attempts.values())
             checkpoint(entry)
         finally:
             if response is not None:
@@ -407,9 +551,12 @@ def _collect_search(*, filters, zip_code, destination, target_listings, budget, 
         checkpoint(entry)
         if interrupted is not None:
             raise interrupted
+        if entry.get('database_outcome') == 'deferred' and report['status'] != 'blocked':
+            continue
         if (report['status']=='blocked' or number==max(1, pages_total or 0)
                 or (target_listings is not None and len(query_listing_ids - earlier_listing_ids) >= target_listings)
                 or (target_vins is not None and len(query_vins - earlier_vins) >= target_vins)):
             break
         number += 1
+    report['retry_attempts'] = sum(max(0, count - 1) for count in page_attempts.values())
     return report

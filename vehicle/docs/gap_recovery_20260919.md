@@ -74,6 +74,45 @@ year and ZIP validation; unexpected schema or context failures still stop global
 Other facet/discovery consumers retain their strict behavior. All 25 parents and
 500 children, including unverified empty groups, remain in the denominator.
 
+## Fourth attempt: a second empty layout stopped the run
+
+That configuration ran at `16:59:47.199409 UTC` and charged **nine requests**
+against the first parent only, `make_002_model_002` (Audi A5). Its lower-year
+tail returned the known missing-`makes` empty layout and stayed unverified.
+Exact years **2010 through 2016** completed with validated native contexts and
+**21 retained VINs**. The run then stopped on `make_002_model_002_year_2017`.
+
+That response was **HTTP 200**, 7,493 bytes, with zero inventory, one native
+page and `appliedMin`/`appliedMax` both 2017. Its facets **did** contain makes:
+Audi was `isApplied: true` with 61 vehicles and ten parent models. **A5 was
+absent from that list.** Carvana omits a zero-count model from the applied
+make's native children, so `validate_context` found no applied A5, raised, and
+the shared invocation stopped with `schema_failure`. Its 491 remaining children
+and all 24 other parents stayed unattempted. Zero inventory here is not an
+observed A5 absence: the response cannot confirm that the requested model
+filter was applied as sent.
+
+This differs from the original 25 gaps. Those were `pagination_unstable` stops
+on populated multi-page queries; this was a client contract gap on an empty
+one. Year partitioning still has not re-enumerated any original gap.
+
+The [retained capture](C:/Users/Sean/VscProjects/researchOS-gap-empty-context/vehicle/data/experiments/carvana_gap_empty_context/2026-09-19/catalog_report.json)
+records `stopped=true`, `pending_request=false` and nine reconciled requests.
+Its export reports 25 parents, 500 children and **zero recovery-complete
+parents**. The September 19 deadline and that authorization have both expired;
+any further recovery needs its own reviewed configuration and fresh destination.
+
+## Reviewed failure dispositions
+
+All four attempts remain immutable, each keeping its own `access_stop.json`.
+Because they are genuine retained evidence rather than resolvable faults, the
+full-inventory configuration now binds them as **reviewed peer failures** by
+exact report, budget and stop hash. A reviewed disposition never deletes or
+edits a stop marker; it records that the failure was inspected so an unrelated
+fresh collection is not blocked forever by a closed investigation. Any changed
+hash, added attempt, pending request, or access, transport, identity, storage
+or pagination outcome in those roots blocks collection again.
+
 ## Preview and inspect
 
 `vehicle/scripts/run_carvana_gap_recovery.py` previews the frozen plan without

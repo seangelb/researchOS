@@ -123,7 +123,8 @@ def test_reconciliation_failure_still_publishes_terminal_stop(experiment, monkey
     assert report['status'] == 'stopped'
     assert report['ended_at'] and report['reconciliation_failure_type'] == 'ValueError'
     assert not report['declared_collection_complete']
-    assert (e.folder.parent/'access_stop.json').is_file()
+    assert not (e.folder.parent/'access_stop.json').exists()
+    assert json.loads((e.folder/'attempt_outcome.json').read_text())['kind'] == 'client_failure'
 
 
 def test_fatal_make_probe_is_not_reinterpreted_as_admitted_discovery(experiment, tmp_path):
@@ -200,7 +201,8 @@ def test_applied_year_boundary_stops_all_year_discovery(experiment, field):
     report = run(e, send)
     assert report['status'] == 'stopped' and report['requests'] == 1
     assert 'applied year' in report['failure_reason']
-    assert (e.folder.parent/'access_stop.json').is_file()
+    assert not (e.folder.parent/'access_stop.json').exists()
+    assert json.loads((e.folder/'attempt_outcome.json').read_text())['kind'] == 'client_failure'
 
 
 @pytest.mark.parametrize('make', ['Tesla', 'Ford'])
@@ -225,7 +227,8 @@ def test_unrequested_applied_model_stops_make_discovery_without_fallback(experim
     assert 'applied model' in report['failure_reason']
     assert report['leaf_queries'] == []
     assert not any(entry['role'] == 'primary_inventory' for entry in report['entries'])
-    assert (e.folder.parent/'access_stop.json').is_file()
+    assert not (e.folder.parent/'access_stop.json').exists()
+    assert json.loads((e.folder/'attempt_outcome.json').read_text())['kind'] == 'client_failure'
 
 
 @pytest.mark.parametrize('kind', ['model_count', 'model_id', 'other_make_count'])
@@ -252,4 +255,29 @@ def test_invalid_native_numbers_stop_instead_of_whole_make_fallback(experiment, 
     report = run(e, send)
     assert report['status'] == 'stopped' and report['requests'] == 2
     assert report['leaf_queries'] == []
-    assert (e.folder.parent/'access_stop.json').is_file()
+    assert not (e.folder.parent/'access_stop.json').exists()
+    assert json.loads((e.folder/'attempt_outcome.json').read_text())['kind'] == 'client_failure'
+
+
+def test_make_facet_count_inventory_drift_falls_back_to_whole_make(experiment):
+    e = experiment
+
+    def send(url, **kwargs):
+        response = e.send(url, **kwargs)
+        filters = kwargs['json']['filters']
+        if filters.get('makes') and not filters['makes'][0].get('parentModels'):
+            data = json.loads(response.content)
+            bucket = data['facetData']['makes']['Tesla']
+            # Same response clock: applied make count one above inventory total.
+            bucket['count'] = data['inventory']['pagination']['totalMatchedInventory'] + 1
+            response.content = json.dumps(data).encode()
+        return response
+
+    report = run(e, send)
+    assert report['status'] == 'collection_finished'
+    assert report['declared_collection_complete']
+    make_entry = next(entry for entry in report['entries'] if entry['role'] == 'make_discovery')
+    assert make_entry['partition_reason'] == (
+        'make facet count differs from inventory total; collect whole make')
+    assert [q['query_id'] for q in report['leaf_queries']] == ['make_000_all']
+    assert not (e.folder.parent/'access_stop.json').exists()

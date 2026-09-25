@@ -46,6 +46,10 @@ class NavigationBudget:
             raise ValueError('Query isolation budget changed; cannot continue')
         self.stopped = False  # Counts, original deadline and last-start spacing remain.
 
+    def abandon_uncertain_request(self, **record):
+        """In-memory budgets keep abandoned transport attempts visible on the object."""
+        self.abandoned_uncertain_requests = [*getattr(self, 'abandoned_uncertain_requests', []), dict(record)]
+
     def response_received(self):
         """In-memory budgets have no response checkpoint."""
 

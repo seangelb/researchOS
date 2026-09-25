@@ -183,6 +183,73 @@ def test_empty_year_is_validated_zero_without_invented_make_or_leaf_queries(year
             if zero['year_query_id'] == 'year_2011'} == {('Audi', 0), ('Tesla', 0)}
 
 
+@pytest.mark.parametrize('layout', ['missing_makes', 'zero_makes'])
+def test_native_empty_year_page_stays_visible_without_stopping_the_sweep(year_experiment, tmp_path, layout):
+    e = year_experiment
+    e.vehicles[:] = [vehicle for vehicle in e.vehicles if vehicle['year'] != 2011]
+
+    def send(url, **kwargs):
+        response = e.send(url, **kwargs)
+        if kwargs['json']['filters'] == {'year': {'min': 2011, 'max': 2011}}:
+            data = json.loads(response.content)
+            # Retained September 19 layout: zero inventory reports one page,
+            # and the omitted-make variant drops its whole make category list.
+            data['inventory']['pagination']['totalMatchedPages'] = 1
+            if layout == 'missing_makes':
+                del data['facetData']['makes']
+            response.content = json.dumps(data).encode()
+        return response
+
+    result = run(e, send)
+    assert result['status'] == 'collection_finished'
+    assert not (e.folder.parent / 'access_stop.json').exists()
+    assert result['primary_queries_complete'] and result['declared_collection_complete']
+    assert result['primary_observed_vins'] == result['year_native_count_sum'] == 35
+    row = next(r for r in result['year_reconciliation'] if r['query_id'] == 'year_2011')
+    assert row['context_validated'] and row['reported_total'] == 0
+    assert row['native_make_categories_available'] is (layout == 'zero_makes')
+    assert row['context_status'] == ('validated' if layout == 'zero_makes'
+                                     else 'empty_make_context_unavailable')
+    assert not any(q['query_id'].startswith('year_2011_') for q in result['planned_make_probes'])
+    zeros = {zero['make'] for zero in result['native_zero_categories'] if zero['year_query_id'] == 'year_2011'}
+    assert zeros == ({'Audi', 'Tesla'} if layout == 'zero_makes' else set())
+    output = catalog.export_catalog(e.folder, output=tmp_path / f'empty-{layout}')
+    years = pd.read_csv(output / 'year_reconciliation.csv')
+    assert years.loc[years.query_id.eq('year_2011'), 'reported_total'].item() == 0
+
+
+def test_empty_leaf_with_unconfirmed_model_context_is_incomplete_not_fatal(year_experiment, tmp_path):
+    e = year_experiment
+    leaf = {'makes': [{'name': 'Audi', 'parentModels': [{'name': 'A5'}]}], 'year': {'min': 2010, 'max': 2010}}
+
+    def send(url, **kwargs):
+        response = e.send(url, **kwargs)
+        request = kwargs['json']
+        if request['filters'] == leaf and request['pagination']['page'] == 1:
+            data = json.loads(response.content)
+            # The A5 count fell to zero between its probe and its enumeration,
+            # so Carvana omits that model from the applied make's children.
+            data['inventory'].update(vehicles=[], pagination=dict(data['inventory']['pagination'],
+                totalMatchedInventory=0, totalMatchedPages=1))
+            data['facetData']['makes']['Audi']['parentModels'] = [
+                child for child in data['facetData']['makes']['Audi']['parentModels'] if child['key'] != 'A5']
+            response.content = json.dumps(data).encode()
+        return response
+
+    result = run(e, send)
+    assert result['status'] == 'collection_finished'
+    assert not (e.folder.parent / 'access_stop.json').exists()
+    entry = next(item for item in result['entries'] if item['query']['filters'] == leaf)
+    assert entry['query_complete'] and not entry['context_validated']
+    assert entry['context_status'] == 'empty_model_context_unavailable'
+    assert entry['query']['query_id'] in result['unverified_context_queries']
+    assert not result['primary_queries_complete'] and not result['declared_collection_complete']
+    output = catalog.export_catalog(e.folder, output=tmp_path / 'unconfirmed-leaf')
+    coverage = pd.read_csv(output / 'coverage.csv')
+    row = coverage.loc[coverage.query_id.eq(entry['query']['query_id'])]
+    assert not row.leaf_complete.item() and row.context_status.item() == 'empty_model_context_unavailable'
+
+
 @pytest.mark.parametrize('problem', ['missing', 'extra', 'wrong', 'boolean'])
 @pytest.mark.parametrize('stage', ['year_only', 'make_year'])
 def test_applied_year_bounds_fail_globally_before_later_work(year_experiment, problem, stage):
@@ -209,7 +276,8 @@ def test_applied_year_bounds_fail_globally_before_later_work(year_experiment, pr
 
     result = run(e, send)
     assert result['status'] == 'stopped' and not result['primary_queries_complete']
-    assert (e.folder.parent / 'access_stop.json').is_file()
+    assert not (e.folder.parent / 'access_stop.json').exists()
+    assert json.loads((e.folder / 'attempt_outcome.json').read_text())['kind'] == 'client_failure'
     assert len(mutated) == 1 and result['requests'] == mutated[0] == len(e.requests)
     assert result['year_native_count_sum'] is None
 
@@ -255,12 +323,13 @@ def test_year_model_pagination_gap_is_preserved_while_other_leaves_finish(year_e
         return response
 
     result = run(e, send)
-    assert len(failed_request_indexes) == 1
+    assert len(failed_request_indexes) >= 1
     assert not result['primary_queries_complete'] and not result['declared_collection_complete']
     assert result['year_native_count_sum'] == len(e.vehicles)
     assert not (e.folder.parent / 'access_stop.json').exists()
     failed = [entry for entry in result['entries'] if entry.get('failure_scope')]
-    assert len(failed) == 1 and not failed[0]['query_complete']
+    assert failed and all(not entry['query_complete'] for entry in failed)
+    original = next(entry for entry in failed if entry['role'] == 'primary_inventory')
     assert any(entry.get('query_complete') and entry['query']['query_id'].startswith('year_upper_tail')
                for entry in result['entries'])
     year = next(row for row in result['year_reconciliation'] if row['query_id'] == 'year_2010')
@@ -268,8 +337,44 @@ def test_year_model_pagination_gap_is_preserved_while_other_leaves_finish(year_e
     assert year['native_minus_observed_vins'] > 0
     output = catalog.export_catalog(e.folder, output=tmp_path / 'pagination-gap')
     coverage = pd.read_csv(output / 'coverage.csv')
-    assert not coverage.loc[coverage.query_id.eq(failed[0]['query']['query_id']), 'query_complete'].item()
+    assert not coverage.loc[coverage.query_id.eq(original['query']['query_id']), 'query_complete'].item()
     assert result['estimated_sales'] is None
+
+
+def test_plan_larger_than_the_allowance_stops_before_bulk_enumeration(year_experiment, tmp_path):
+    e = year_experiment
+    e.config['max_requests'] = 20
+    e.path.write_text(json.dumps(e.config), encoding='utf-8')
+    result = run(e)
+    feasibility = result['feasibility']
+    assert result['leaf_plan_frozen'] and result['feasibility_blocked']
+    assert not feasibility['fits_remaining_allowance'] and not feasibility['requests_fit']
+    assert feasibility['estimated_minimum_requests'] > feasibility['request_ceiling'] == 20
+    assert feasibility['estimated_leaf_pages'] and not feasibility['leaf_queries_without_native_count']
+    # The shortfall is a planning outcome, not a failure that blocks the next date.
+    assert result['status'] == 'collection_finished'
+    assert not (e.folder.parent / 'access_stop.json').exists()
+    assert result['requests'] == len(e.requests) == feasibility['requests_used'] < 20
+    assert not result['primary_queries_complete'] and not result['declared_collection_complete']
+    assert result['discovery_complete'] and not result['planned_geographic_checks']
+    enumerated = {entry['query']['query_id'] for entry in result['entries']
+                  if entry['role'] == 'primary_inventory'}
+    assert not enumerated
+    output = catalog.export_catalog(e.folder, output=tmp_path / 'too-large')
+    coverage = pd.read_csv(output / 'coverage.csv')
+    assert {q['query_id'] for q in result['leaf_queries']} <= set(coverage.query_id)
+    assert coverage.status.eq('unattempted').any()
+
+
+def test_plan_within_the_allowance_still_enumerates_every_leaf(year_experiment):
+    e = year_experiment
+    result = run(e)
+    feasibility = result['feasibility']
+    assert feasibility['fits_remaining_allowance'] and not result.get('feasibility_blocked')
+    # The estimate is a floor: the finished run cannot cost fewer requests.
+    assert feasibility['estimated_minimum_requests'] <= result['requests'] == len(e.requests)
+    assert result['primary_queries_complete'] and result['declared_collection_complete']
+    assert result['primary_observed_vins'] == 39
 
 
 @pytest.mark.parametrize('field', ['year_plan', 'year_probes', 'candidate', 'zero',
@@ -359,7 +464,8 @@ def test_fatal_year_probe_keeps_evidence_without_admitting_valid_facet_metadata(
     child = json.loads(Path(failed['report']).read_text())
     assert child['pages'][0]['facet_source']
     assert child['reported_total'] == (28 if failure == 'identity_failure' else None)
-    assert result['status'] == 'stopped' and (e.folder.parent/'access_stop.json').exists()
+    assert result['status'] == 'stopped' and not (e.folder.parent/'access_stop.json').exists()
+    assert json.loads((e.folder/'attempt_outcome.json').read_text())['kind'] == 'client_failure'
     assert [item['partition']['query_id'] for item in result['year_discoveries']] == ['year_lower_tail']
     assert len(result['planned_year_probes']) == 5
     assert all(q['filters']['year'] == {'max': 2009} for q in result['planned_make_probes'])
@@ -385,11 +491,11 @@ def test_model_subdivision_cannot_clip_a_positive_tail_year_filter(year_experime
     original = catalog.model_partitions
 
     def clipped(*args, **kwargs):
-        children, reason = original(*args, **kwargs)
+        children, reason, overlap = original(*args, **kwargs)
         if kwargs.get('year_bounds') == {'max': 2009}:
             children = copy.deepcopy(children)
             children[0]['filters']['year']['min'] = 1900
-        return children, reason
+        return children, reason, overlap
 
     monkeypatch.setattr(catalog, 'model_partitions', clipped)
     result = run(e)
@@ -397,3 +503,425 @@ def test_model_subdivision_cannot_clip_a_positive_tail_year_filter(year_experime
     assert 'clips or changes its mandatory year context' in result['failure_reason']
     assert not result['leaf_queries'] and not result['primary_queries_complete']
     assert len(e.requests) == 3  # Broad, year tail, make probe; no clipped child request.
+
+
+def _chevy_capture(*, inventory_total, models, year=2024):
+    bounds = {'min': year, 'max': year}
+    children = [dict(key=name, count=count, isApplied=False, modelIds=ids)
+                for name, count, ids in models]
+    return dict(
+        request=dict(filters={'makes': [{'name': 'Chevrolet'}], 'year': bounds},
+                     pagination=dict(page=1, pageSize=24), sortBy='MostPopular', zip5='08542'),
+        zip_code='08542',
+        pagination=dict(currentPage=1, pageSize=24, totalMatchedInventory=inventory_total,
+                        totalMatchedPages=(inventory_total + 23) // 24),
+        facet_data=dict(year=dict(min=2010, max=2027, appliedMin=year, appliedMax=year),
+                        makes={'Chevrolet': dict(key='Chevrolet', count=inventory_total,
+                                                 isApplied=True, parentModels=children)}))
+
+
+@pytest.mark.parametrize('inventory_total,models,excess', [
+    (936, [('Blazer EV', 216, [1]), ('Silverado 1500', 129, [2]),
+           ('Silverado 3500', 11, [497, 3]), ('Silverado 3500 HD Chassis Cab', 1, [497, 4]),
+           ('Equinox', 579, [5])], 0),
+    (993, [('Trax', 338, [10]), ('Equinox', 132, [11]),
+           ('Silverado 3500', 6, [497, 12]), ('Silverado 3500 HD Chassis Cab', 2, [497, 13]),
+           ('Malibu', 517, [14])], 2),
+])
+def test_overlapping_model_ids_split_when_count_excess_fits(inventory_total, models, excess):
+    capture = _chevy_capture(inventory_total=inventory_total, models=models)
+    children, reason, overlap = catalog.model_partitions(
+        capture, 'Chevrolet', '08542', 'year_2024_make_006', year_bounds={'min': 2024, 'max': 2024})
+    assert reason == 'overlapping model ids; each model collected'
+    assert {q['filters']['makes'][0]['parentModels'][0]['name'] for q in children} == {m[0] for m in models}
+    assert not any(q['query_id'].endswith('_all') for q in children)
+    assert overlap['count_excess'] == excess
+    assert overlap['inventory_total'] == inventory_total
+    assert overlap['shared_model_ids'] == [497]
+    assert any(cluster['models'] == ['Silverado 3500', 'Silverado 3500 HD Chassis Cab']
+               for cluster in overlap['clusters'])
+
+
+@pytest.mark.parametrize('inventory_total,models', [
+    (100, [('A', 40, [1]), ('B', 40, [2]), ('C', 10, [3])]),  # shortfall
+    (100, [('A', 5, [497, 1]), ('B', 5, [497, 2]), ('C', 100, [3])]),  # excess 10 > capacity 5
+])
+def test_overlapping_or_short_model_counts_keep_whole_make_when_unexplained(inventory_total, models):
+    capture = _chevy_capture(inventory_total=inventory_total, models=models)
+    children, reason, overlap = catalog.model_partitions(
+        capture, 'Chevrolet', '08542', 'year_2024_make_006', year_bounds={'min': 2024, 'max': 2024})
+    assert children == [catalog.query('year_2024_make_006_all', '08542',
+        {'makes': [{'name': 'Chevrolet'}], 'year': {'min': 2024, 'max': 2024}})]
+    assert reason == 'model counts/IDs do not partition make; collect whole make'
+    assert overlap is None
+
+
+def test_short_window_refuses_before_date_folder(year_experiment):
+    e = year_experiment
+    e.config['max_requests'] = 6000
+    e.config['max_seconds'] = 100
+    e.path.write_text(json.dumps(e.config), encoding='utf-8')
+    preview = catalog.preview(e.path)
+    assert not preview['ceiling_pacing_fits_window']
+    with pytest.raises(ValueError, match='three-second pacing of the request ceiling'):
+        run(e)
+    assert not e.folder.exists()
+
+
+def test_explained_overlap_duplicate_keeps_scope_reconciled(year_experiment, tmp_path):
+    e = year_experiment
+    shared = next(v for v in e.vehicles if v['year'] == 2010 and v['parentModel'] == 'A4')
+
+    def send(url, **kwargs):
+        response = e.send(url, **kwargs)
+        request = kwargs['json']
+        filters = request['filters']
+        makes = filters.get('makes') or []
+        if (makes and not makes[0].get('parentModels')
+                and filters.get('year') == {'min': 2010, 'max': 2010}
+                and makes[0].get('name') == 'Audi'):
+            data = json.loads(response.content)
+            bucket = data['facetData']['makes']['Audi']
+            for child in bucket['parentModels']:
+                if child['key'] in ('A4', 'A5'):
+                    child['modelIds'] = [497, *child['modelIds']]
+            # One shared VIN counted in both model families: inventory is sum - 1.
+            data['inventory']['pagination']['totalMatchedInventory'] = (
+                sum(child['count'] for child in bucket['parentModels']) - 1)
+            data['inventory']['pagination']['totalMatchedPages'] = (
+                data['inventory']['pagination']['totalMatchedInventory'] + 23) // 24
+            bucket['count'] = data['inventory']['pagination']['totalMatchedInventory']
+            response.content = json.dumps(data).encode()
+        models = makes[0].get('parentModels') if makes else None
+        if (models and models[0]['name'] == 'A5'
+                and filters.get('year') == {'min': 2010, 'max': 2010}
+                and request['pagination']['page'] == 1):
+            data = json.loads(response.content)
+            if not any(v['vin'] == shared['vin'] for v in data['inventory']['vehicles']):
+                row = dict(shared, parentModel='A5', model='A5')
+                data['inventory']['vehicles'] = [row, *data['inventory']['vehicles']]
+                data['inventory']['pagination']['totalMatchedInventory'] += 1
+                data['inventory']['pagination']['totalMatchedPages'] = (
+                    data['inventory']['pagination']['totalMatchedInventory'] + 23) // 24
+                response.content = json.dumps(data).encode()
+        return response
+
+    result = run(e, send)
+    make = next(entry for entry in result['entries']
+                if entry['role'] == 'make_discovery'
+                and entry['query']['filters'] == {'makes': [{'name': 'Audi'}],
+                                                  'year': {'min': 2010, 'max': 2010}})
+    assert make['partition_reason'] == 'overlapping model ids; each model collected'
+    assert make['model_id_overlap']['shared_model_ids'] == [497]
+    assert result['duplicate_primary_memberships'] == 1
+    assert result['explained_duplicate_primary_memberships'] == 1
+    assert result['unexplained_duplicate_primary_memberships'] == 0
+    assert result['primary_queries_complete']
+    assert result['primary_scope_reconciled']
+    catalog.export_catalog(e.folder, output=tmp_path / 'overlap-export')
+
+
+def test_unexpected_duplicate_across_disjoint_models_blocks_reconciled(year_experiment):
+    e = year_experiment
+    shared = next(v for v in e.vehicles if v['year'] == 2010 and v['parentModel'] == 'A4')
+
+    def send(url, **kwargs):
+        response = e.send(url, **kwargs)
+        request = kwargs['json']
+        filters = request['filters']
+        makes = filters.get('makes') or []
+        models = makes[0].get('parentModels') if makes else None
+        if (models and models[0]['name'] == 'A5'
+                and filters.get('year') == {'min': 2010, 'max': 2010}
+                and request['pagination']['page'] == 1):
+            data = json.loads(response.content)
+            if not any(v['vin'] == shared['vin'] for v in data['inventory']['vehicles']):
+                row = dict(shared, parentModel='A5', model='A5')
+                data['inventory']['vehicles'] = [row, *data['inventory']['vehicles']]
+                data['inventory']['pagination']['totalMatchedInventory'] += 1
+                data['inventory']['pagination']['totalMatchedPages'] = (
+                    data['inventory']['pagination']['totalMatchedInventory'] + 23) // 24
+                response.content = json.dumps(data).encode()
+        return response
+
+    result = run(e, send)
+    make = next(entry for entry in result['entries']
+                if entry['role'] == 'make_discovery'
+                and entry['query']['filters'] == {'makes': [{'name': 'Audi'}],
+                                                  'year': {'min': 2010, 'max': 2010}})
+    assert make['partition_reason'] == 'native model partition'
+    assert 'model_id_overlap' not in make
+    assert result['duplicate_primary_memberships'] == 1
+    assert result['unexplained_duplicate_primary_memberships'] == 1
+    assert result['primary_queries_complete']
+    assert not result['primary_scope_reconciled']
+
+
+def _share_audi_model_ids(response):
+    data = json.loads(response.content)
+    bucket = data['facetData']['makes']['Audi']
+    for child in bucket['parentModels']:
+        if child['key'] in ('A4', 'A5'):
+            child['modelIds'] = [497, *child['modelIds']]
+    data['inventory']['pagination']['totalMatchedInventory'] = (
+        sum(child['count'] for child in bucket['parentModels']) - 1)
+    data['inventory']['pagination']['totalMatchedPages'] = (
+        data['inventory']['pagination']['totalMatchedInventory'] + 23) // 24
+    bucket['count'] = data['inventory']['pagination']['totalMatchedInventory']
+    response.content = json.dumps(data).encode()
+    return response
+
+
+def test_overlap_cluster_leaf_admits_sibling_parent_model(year_experiment, tmp_path):
+    e = year_experiment
+    shared = next(v for v in e.vehicles if v['year'] == 2010 and v['parentModel'] == 'A5')
+
+    def send(url, **kwargs):
+        response = e.send(url, **kwargs)
+        request = kwargs['json']
+        filters = request['filters']
+        makes = filters.get('makes') or []
+        if (makes and not makes[0].get('parentModels')
+                and filters.get('year') == {'min': 2010, 'max': 2010}
+                and makes[0].get('name') == 'Audi'):
+            return _share_audi_model_ids(response)
+        models = makes[0].get('parentModels') if makes else None
+        if (models and models[0]['name'] == 'A4'
+                and filters.get('year') == {'min': 2010, 'max': 2010}
+                and request['pagination']['page'] == 1):
+            data = json.loads(response.content)
+            bucket = data['facetData']['makes']['Audi']
+            for child in bucket['parentModels']:
+                if child['key'] in ('A4', 'A5'):
+                    child['modelIds'] = [497, *child.get('modelIds', [])]
+            if not any(v.get('parentModel') == 'A5' for v in data['inventory']['vehicles']):
+                data['inventory']['vehicles'] = [dict(shared, parentModel='A5', model='A5'),
+                                                *data['inventory']['vehicles']]
+                data['inventory']['pagination']['totalMatchedInventory'] += 1
+                data['inventory']['pagination']['totalMatchedPages'] = (
+                    data['inventory']['pagination']['totalMatchedInventory'] + 23) // 24
+            response.content = json.dumps(data).encode()
+        return response
+
+    result = run(e, send)
+    assert result['status'] == 'collection_finished'
+    assert result['explained_duplicate_primary_memberships'] >= 1
+    output = catalog.export_catalog(e.folder, output=tmp_path / 'sibling-export')
+    observations = pd.read_csv(output / 'observations.csv')
+    assert shared['vin'] in set(observations.vin)
+
+
+def test_non_cluster_parent_model_is_rejected_then_isolated(year_experiment):
+    e = year_experiment
+    hits = {'n': 0}
+
+    def send(url, **kwargs):
+        response = e.send(url, **kwargs)
+        request = kwargs['json']
+        models = request['filters'].get('makes', [{}])[0].get('parentModels')
+        if (models and models[0]['name'] == 'A4'
+                and request['filters'].get('year') == {'min': 2010, 'max': 2010}):
+            hits['n'] += 1
+            data = json.loads(response.content)
+            if data['inventory']['vehicles']:
+                data['inventory']['vehicles'][0]['parentModel'] = 'Model 3'
+                data['inventory']['vehicles'][0]['make'] = 'Audi'
+            response.content = json.dumps(data).encode()
+        return response
+
+    result = run(e, send)
+    assert result['status'] == 'collection_finished'
+    leaf = next(entry for entry in result['entries']
+                if entry['role'] == 'primary_inventory'
+                and entry['query']['filters'].get('makes', [{}])[0].get('parentModels') == [{'name': 'A4'}]
+                and entry['query']['filters'].get('year') == {'min': 2010, 'max': 2010})
+    assert leaf['outcome_kind'] == 'schema_failure'
+    assert leaf.get('failure_scope')
+    assert 'Returned vehicle violates requested make/model filters' in (leaf.get('report') and
+        json.loads(Path(leaf['report']).read_text(encoding='utf-8'))['reason'])
+    assert not (e.folder.parent / 'access_stop.json').exists()
+    assert any(entry['role'] == 'closing_discovery' and entry.get('report') for entry in result['entries'])
+
+
+def test_retry_succeeds_on_second_page_attempt(year_experiment):
+    e = year_experiment
+    hits = {'n': 0}
+
+    def send(url, **kwargs):
+        request = kwargs['json']
+        models = request['filters'].get('makes', [{}])[0].get('parentModels')
+        if (models and models[0]['name'] == 'A4'
+                and request['filters'].get('year') == {'min': 2010, 'max': 2010}):
+            hits['n'] += 1
+            response = e.send(url, **kwargs)
+            if hits['n'] == 1 and json.loads(response.content)['inventory']['vehicles']:
+                data = json.loads(response.content)
+                data['inventory']['vehicles'][0]['make'] = 'NotAudi'
+                response.content = json.dumps(data).encode()
+            return response
+        return e.send(url, **kwargs)
+
+    result = run(e, send)
+    assert result['status'] == 'collection_finished'
+    assert result['primary_queries_complete']
+    assert hits['n'] >= 2
+    leaf = next(entry for entry in result['entries']
+                if entry['role'] == 'primary_inventory'
+                and entry['query']['filters'].get('makes', [{}])[0].get('parentModels') == [{'name': 'A4'}]
+                and entry['query']['filters'].get('year') == {'min': 2010, 'max': 2010})
+    child = json.loads(Path(leaf['report']).read_text(encoding='utf-8'))
+    assert child['retry_attempts'] >= 1
+    assert child['query_complete']
+    assert child['requests'] >= 2
+
+
+def test_retry_exhausted_leaf_is_isolated_and_sweep_continues(year_experiment):
+    e = year_experiment
+
+    def send(url, **kwargs):
+        response = e.send(url, **kwargs)
+        request = kwargs['json']
+        models = request['filters'].get('makes', [{}])[0].get('parentModels')
+        if (models and models[0]['name'] == 'A4'
+                and request['filters'].get('year') == {'min': 2010, 'max': 2010}):
+            data = json.loads(response.content)
+            if data['inventory']['vehicles']:
+                data['inventory']['vehicles'][0]['make'] = 'NotAudi'
+            response.content = json.dumps(data).encode()
+        return response
+
+    result = run(e, send)
+    assert result['status'] == 'collection_finished'
+    assert not result['primary_queries_complete']
+    assert not (e.folder.parent / 'access_stop.json').exists()
+    assert any(entry['role'] == 'primary_inventory_retry' for entry in result['entries'])
+    assert any(entry['role'] == 'closing_discovery' and entry.get('report') for entry in result['entries'])
+
+
+def test_http_403_still_stops_and_writes_access_stop(year_experiment):
+    e = year_experiment
+
+    def send(url, **kwargs):
+        request = kwargs['json']
+        models = request['filters'].get('makes', [{}])[0].get('parentModels')
+        if (models and models[0]['name'] == 'A4'
+                and request['filters'].get('year') == {'min': 2010, 'max': 2010}):
+            return SimpleNamespace(content=b'{"error":"denied"}', status_code=403,
+                headers={'content-type': 'application/json'}, close=lambda: None)
+        return e.send(url, **kwargs)
+
+    result = run(e, send)
+    assert result['status'] == 'stopped'
+    assert result.get('failure_reason') in {'http_access_failure', 'CollectionStopped'} or 'http_access' in str(result.get('failure_reason'))
+    stop = json.loads((e.folder.parent / 'access_stop.json').read_text())
+    outcome = json.loads((e.folder / 'attempt_outcome.json').read_text())
+    assert outcome['kind'] == 'access_stop' and outcome['http_status'] == 403
+    assert stop['cooldown_until'] == outcome['cooldown_until']
+
+
+def test_transport_drop_is_retried_and_abandoned_request_is_recorded(year_experiment):
+    e = year_experiment
+    hits = {'n': 0}
+
+    def send(url, **kwargs):
+        request = kwargs['json']
+        models = request['filters'].get('makes', [{}])[0].get('parentModels')
+        if (models and models[0]['name'] == 'A4'
+                and request['filters'].get('year') == {'min': 2010, 'max': 2010}):
+            hits['n'] += 1
+            if hits['n'] == 1:
+                raise ConnectionError('synthetic transport drop')
+        return e.send(url, **kwargs)
+
+    result = run(e, send)
+    assert result['status'] == 'collection_finished'
+    assert result['primary_queries_complete']
+    budget = json.loads((e.folder / 'catalog_budget.json').read_text(encoding='utf-8'))
+    assert budget['abandoned_uncertain_requests']
+    assert budget['budget']['pending_request'] is False
+    assert hits['n'] >= 2
+
+
+def _fast_retries(experiment, **policy):
+    experiment.config['retry_policy'] = dict(retry_backoff_seconds=[0, 0], **policy)
+    experiment.path.write_text(json.dumps(experiment.config), encoding='utf-8')
+
+
+def _server_error():
+    return SimpleNamespace(content=b'origin error', status_code=520,
+                           headers={'content-type': 'text/plain'}, close=lambda: None)
+
+
+def test_server_failure_retries_then_completes_the_leaf(year_experiment):
+    e = year_experiment
+    _fast_retries(e)
+    hits = {'n': 0}
+
+    def send(url, **kwargs):
+        request = kwargs['json']
+        models = request['filters'].get('makes', [{}])[0].get('parentModels')
+        if (models and models[0]['name'] == 'A4'
+                and request['filters'].get('year') == {'min': 2010, 'max': 2010}):
+            hits['n'] += 1
+            if hits['n'] == 1:
+                return _server_error()
+        return e.send(url, **kwargs)
+
+    result = run(e, send)
+    assert hits['n'] >= 2
+    assert result['status'] == 'collection_finished' and result['declared_collection_complete']
+    assert not (e.folder.parent / 'access_stop.json').exists()
+    leaf = next(entry for entry in result['entries']
+                if entry['role'] == 'primary_inventory'
+                and entry['query']['filters'].get('makes', [{}])[0].get('parentModels') == [{'name': 'A4'}]
+                and entry['query']['filters'].get('year') == {'min': 2010, 'max': 2010})
+    child = json.loads(Path(leaf['report']).read_text(encoding='utf-8'))
+    assert child['query_complete'] and child['retry_attempts'] >= 1
+    assert json.loads((e.folder / 'attempt_outcome.json').read_text())['kind'] == 'complete'
+
+
+def test_persistent_server_failure_isolates_the_leaf_and_finishes(year_experiment):
+    e = year_experiment
+    _fast_retries(e)
+
+    def send(url, **kwargs):
+        request = kwargs['json']
+        models = request['filters'].get('makes', [{}])[0].get('parentModels')
+        if (models and models[0]['name'] == 'A4'
+                and request['filters'].get('year') == {'min': 2010, 'max': 2010}):
+            return _server_error()
+        return e.send(url, **kwargs)
+
+    result = run(e, send)
+    assert result['status'] == 'collection_finished'
+    assert not result['primary_queries_complete']
+    assert not (e.folder.parent / 'access_stop.json').exists()
+    leaf = next(entry for entry in result['entries']
+                if entry.get('outcome_kind') == 'server_failure')
+    assert leaf['failure_scope'] and leaf['requests'] == 3
+    assert any(entry['role'] == 'closing_discovery' and entry.get('report') for entry in result['entries'])
+    assert json.loads((e.folder / 'attempt_outcome.json').read_text())['kind'] == 'finished_incomplete'
+
+
+def test_consecutive_server_failures_end_the_attempt_as_degraded(year_experiment):
+    e = year_experiment
+    for year in (2010, 2011, 2012):
+        e.add(year, 'Audi', 'A4', 30)
+        e.add(year, 'Audi', 'A5', 30)
+    _fast_retries(e, consecutive_failure_breaker=5)
+
+    def send(url, **kwargs):
+        models = kwargs['json']['filters'].get('makes', [{}])[0].get('parentModels')
+        if models:
+            return _server_error()
+        return e.send(url, **kwargs)
+
+    result = run(e, send)
+    assert result['status'] == 'stopped'
+    assert result['failure_type'] == 'degraded'
+    assert result['consecutive_isolated_leaves'] == 5
+    assert not (e.folder.parent / 'access_stop.json').exists()
+    outcome = json.loads((e.folder / 'attempt_outcome.json').read_text())
+    assert outcome['kind'] == 'degraded' and outcome['cooldown_until']
+    assert not any(entry['role'] == 'closing_discovery' and entry.get('report') for entry in result['entries'])
+

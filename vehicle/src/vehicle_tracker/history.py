@@ -93,7 +93,8 @@ def _source_less_checkpoint(report_path, report, page):
         clocks = [pd.Timestamp(value) for value in [reserved, started] if value is not None]
         if not reserved or any(pd.isna(value) or value.tzinfo is None for value in clocks) or clocks != sorted(clocks):
             raise ValueError('Reserved checkpoint lacks valid request clocks')
-    journal = json.loads((report_path.parent / 'attempts' / f"{page['page']:04d}.json").read_text(encoding='utf-8'))
+    from vehicle_tracker.search import attempt_journal_name
+    journal = json.loads((report_path.parent / 'attempts' / attempt_journal_name(page)).read_text(encoding='utf-8'))
     from vehicle_tracker.search import build_search_request
     request = build_search_request(filters=report['filters'], zip_code=report['zip_code'],
                                    page=page['page'], location_filter=report.get('location_filter', False))
@@ -155,7 +156,19 @@ def read_query_evidence(report_path, *, diagnostic=False):
             evidence_available_at_utc=available_at))
         if page['status'] != 'parsed':
             continue
-        frame = parse_capture(capture)
+        siblings = ()
+        facet_page = next((item for item in report['pages'] if item.get('facet_source')), None)
+        if facet_page:
+            from vehicle_tracker.search import overlap_siblings
+            facet_path = Path(facet_page['facet_source'])
+            if file_hash(facet_path) != facet_page['facet_sha256']:
+                raise ValueError('Retained facet changed')
+            facet = json.loads(facet_path.read_text(encoding='utf-8'))
+            siblings = overlap_siblings(facet.get('facet_data'), report['filters'])
+            recorded = tuple(capture.get('overlap_parent_models') or ())
+            if recorded and recorded != siblings:
+                raise ValueError('Retained overlap siblings differ from the page-1 facet')
+        frame = parse_capture(capture, overlap_siblings=siblings)
         request = capture['request']
         location_filter = request.get('requestedFeatures', []) == ['LocationBasedPrefiltering']
         if request.get('requestedFeatures', []) not in ([], ['LocationBasedPrefiltering']):

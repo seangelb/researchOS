@@ -2,10 +2,30 @@
 
 - The September 19 user-directed expansion is described in
   [the full-inventory goal](docs/full_inventory_goal.md) and
-  [operating guide](docs/full_inventory.md). Its separate config allows at most
-  6,000 requests/six hours with the same three-second spacing and fatal stops.
-  Do not substitute this scope into the frozen 101-query trial or status study.
+  [operating guide](docs/full_inventory.md). The daily config is
+  `config/carvana_full_inventory_adaptive.json`. It allows at most 7,000
+  requests/six hours. Make/year cells of at most 480 vehicles are collected as
+  one query. Larger cells are probed, then split into models. The first attempt
+  of a clean day uses three-second spacing; a later attempt the same day, or the
+  day after an access stop, uses the next slower spacing. A day starts only when
+  the estimated plan fits the remaining window at that spacing. Page-level
+  schema, pagination, identity, transport and server failures (HTTP 408 and 5xx,
+  including 520) retry twice, then isolate the leaf. Five consecutive isolated
+  leaves end that attempt. HTTP 401/403, 429 and Cloudflare challenges end the
+  attempt, record a cooldown, and a later attempt runs more slowly. HTTP 520 is
+  not an access stop. A finished plan whose unverified leaves are at most half
+  of one percent of the opening count is `complete_with_gaps`. Do not substitute
+  this scope into the frozen 101-query trial or status study.
   Software/configuration updates alone do not establish a live baseline.
+- Daily adaptive full inventory is scheduled on this PC via Windows Task
+  Scheduler task `researchOS-CarvanaFullInventoryDaily` (12:01 AM local Eastern,
+  then hourly through 8:01 PM, and at logon), wrapper
+  `scripts/run_carvana_full_inventory_daily.ps1`. Requires the machine
+  awake/logged on and VPN off. The wrapper asks `daily_decision` and starts
+  only when today's attempt should run. A finished attempt, including
+  `complete_with_gaps` and `infeasible`, is not repeated. An access cooldown or
+  a held root lock still blocks. A terminal failure with no active cooldown does
+  not block the next local date.
 
 - Live Carvana access is stopped after HTTP 403 on September 18, 2026. Read
   [the retained outcome](docs/facet_outcome_20260918.md) before any daily or browser

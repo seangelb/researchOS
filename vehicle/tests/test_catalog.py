@@ -106,8 +106,12 @@ def test_small_make_reuses_probe_instead_of_refetching(experiment):
 
 
 @pytest.mark.parametrize('kind',['403','429','challenge','transport','schema','context','identity'])
-def test_fatal_stop_no_retries_and_future_date_blocked(experiment,kind):
+def test_access_stops_cool_down_and_other_failures_do_not_block_the_next_date(experiment,kind):
     e=experiment
+    access = kind in {'403','429','challenge'}
+    if access:
+        e.config['retry_policy'] = dict(cooldown_minutes_after_access_stop=[2880, 2880, 2880])
+        e.path.write_text(json.dumps(e.config))
     def send(url,**kwargs):
         if kind=='transport':raise TimeoutError('private message')
         response=e.send(url,**kwargs)
@@ -125,9 +129,16 @@ def test_fatal_stop_no_retries_and_future_date_blocked(experiment,kind):
     result=run(e,post)
     assert result['status']=='stopped'
     assert post.call_count==(2 if kind=='identity' else 1)
-    assert (e.folder.parent/'access_stop.json').is_file()
-    e.clock.seconds+=86400
-    with pytest.raises(ValueError,match='access stop'):run(e,post)
+    stop = e.folder.parent/'access_stop.json'
+    outcome = json.loads((e.folder/'attempt_outcome.json').read_text())
+    if access:
+        assert stop.is_file() and outcome['kind']=='access_stop' and outcome['cooldown_until']
+        e.clock.seconds+=86400
+        with pytest.raises(ValueError,match='access stop'):run(e,post)
+    else:
+        assert not stop.exists() and outcome['kind']=='client_failure'
+        e.clock.seconds+=86400
+        assert run(e,post)['status']=='stopped'
     assert 'private message' not in (e.folder/'catalog_report.json').read_text()
 
 
@@ -188,7 +199,8 @@ def test_partial_pagination_isolated_and_not_retried(experiment,tmp_path):
     result=run(e,send)
     assert not result['primary_queries_complete']
     isolated=[x for x in result['entries'] if x.get('failure_scope')]
-    assert len(isolated)==1 and isolated[0]['query']['query_id']=='make_000_model_000'
+    assert isolated and isolated[0]['query']['query_id']=='make_000_model_000'
+    assert any(x.get('retry_of')=='make_000_model_000' for x in isolated)
     assert next(x for x in result['entries'] if x['query']['query_id']=='make_000_model_001')['query_complete']
     assert not (e.folder.parent/'access_stop.json').exists()
     output=catalog.export_catalog(e.folder,output=tmp_path/'partial')
@@ -216,14 +228,17 @@ def test_deadline_response_is_not_success_even_when_last_query(experiment):
     assert report['status']=='stopped' and report['requests']==11
 
 
-def test_unresolved_previous_date_blocks_new_attempt(experiment):
+def test_unresolved_previous_date_does_not_block_a_new_attempt(experiment):
     e=experiment
     previous=e.folder.parent/'2026-09-18';previous.mkdir(parents=True)
-    (previous/'catalog_budget.json').write_text(json.dumps({'budget':{'pending_request':False}}))
-    (previous/'catalog_report.json').write_text(json.dumps({'status':'running'}))
-    post=Mock()
-    with pytest.raises(ValueError,match='Unresolved prior'):run(e,post)
-    post.assert_not_called()
+    budget_text=json.dumps({'budget':{'pending_request':False}})
+    report_text=json.dumps({'status':'running'})
+    (previous/'catalog_budget.json').write_text(budget_text)
+    (previous/'catalog_report.json').write_text(report_text)
+    report=run(e)
+    assert report['status']=='collection_finished'
+    assert (previous/'catalog_budget.json').read_text()==budget_text
+    assert (previous/'catalog_report.json').read_text()==report_text
 
 
 def test_empty_catalog_keeps_zero_and_does_not_invent_inventory(experiment,tmp_path):

@@ -85,52 +85,88 @@ def validate_plan(queries):
             raise ValueError('location_filter must be an explicit boolean')
 
 
-def verify_isolated_pagination(report_file, *, known_listing_vins, requests):
-    """Prove a completed, stored pagination failure has no hidden identity conflict.
+ISOLATABLE_LEAF_OUTCOMES = frozenset({
+    'pagination_unstable', 'schema_failure', 'identity_failure', 'transport_failure',
+    'server_failure'})
 
-    Failed page rows remain excluded. Replaying them here only checks that it is
-    safe to collect another independent query; this never repairs completeness.
+
+def verify_isolated_pagination(report_file, *, known_listing_vins, requests):
+    """Prove a completed, stored pagination failure has no hidden identity conflict."""
+    return verify_isolated_leaf_failure(report_file, known_listing_vins=known_listing_vins,
+                                        requests=requests, outcome='pagination_unstable')
+
+
+def verify_isolated_leaf_failure(report_file, *, known_listing_vins, requests, outcome=None):
+    """Prove a retry-exhausted leaf may continue the plan without repairing coverage.
+
+    Failed page rows remain excluded. Replaying admitted pages only checks that it
+    is safe to collect another independent query.
     """
     from vehicle_tracker.history import read_query_evidence
-    from vehicle_tracker.search import project_response, build_search_request
+    from vehicle_tracker.search import attempt_journal_name, project_response, build_search_request
     from vehicle_tracker.search_evidence import verify_response_evidence
     from vehicle_tracker.carvana import parse_capture
     report = json.loads(Path(report_file).read_text(encoding='utf-8'))
     pages = report['pages']
-    if (report.get('outcome_kind') != 'pagination_unstable' or report['query_complete']
-            or report['requests'] != requests or not pages or len(pages) != requests
-            or pages[-1].get('outcome_kind') != 'pagination_unstable'
-            or pages[-1]['status'] != 'failed'
-            or any(p['status'] != 'parsed' for p in pages[:-1])):
-        raise ValueError('Only a completed pagination-only query may be isolated')
-    _, source_captures, source_rows = read_query_evidence(report_file)
-    captured, stored = read_snapshots(Path(report_file).parent/'vehicle.sqlite')
-    actual = captured.rename(columns={'page_number':'page', 'source_sha256':'capture_id'})
-    columns = ['run_id','page','capture_id','status','row_count','observed_at_utc','error']
-    pd.testing.assert_frame_equal(actual[columns].sort_values('page').reset_index(drop=True),
-        source_captures[columns].sort_values('page').reset_index(drop=True), check_dtype=False, check_exact=True)
-    if not source_rows.empty:
-        expected = source_rows.drop(columns=[*NATIVE_FIELDS,'capture_id','run_id'])
-        pd.testing.assert_frame_equal(expected.sort_values('listing_id').reset_index(drop=True),
-            stored[expected.columns].sort_values('listing_id').reset_index(drop=True), check_dtype=False, check_exact=True)
-    elif not stored.empty:
-        raise ValueError('Unexpected stored observations in failed query')
+    expected = outcome or report.get('outcome_kind')
+    last = pages[-1] if pages else {}
+    prior_ok = all(p['status'] == 'parsed' or p.get('database_outcome') == 'deferred'
+                   for p in pages[:-1]) if pages else False
+    last_failed = last.get('status') == 'failed' and last.get('outcome_kind') == expected
+    last_count_mismatch = (expected == 'pagination_unstable' and last.get('status') == 'parsed'
+                           and report.get('status') == 'partial' and not report['query_complete'])
+    if (expected not in ISOLATABLE_LEAF_OUTCOMES or report.get('outcome_kind') != expected
+            or report['query_complete'] or report['requests'] != requests or not pages
+            or len(pages) != requests or not prior_ok or not (last_failed or last_count_mismatch)):
+        raise ValueError('Only a completed retryable leaf failure may be isolated')
+    _, source_captures, source_rows = read_query_evidence(report_file, diagnostic=True)
+    stored_hashes = {p['source_sha256'] for p in pages
+                     if p.get('source_sha256') and p.get('database_outcome') != 'deferred'}
+    source_stored = source_captures[source_captures.capture_id.isin(stored_hashes)] if not source_captures.empty else source_captures
+    database = Path(report_file).parent/'vehicle.sqlite'
+    if database.is_file():
+        captured, stored = read_snapshots(database)
+        actual = captured.rename(columns={'page_number':'page', 'source_sha256':'capture_id'})
+        columns = ['run_id','page','capture_id','status','row_count','observed_at_utc','error']
+        if not source_stored.empty:
+            pd.testing.assert_frame_equal(actual[columns].sort_values('capture_id').reset_index(drop=True),
+                source_stored[columns].sort_values('capture_id').reset_index(drop=True), check_dtype=False, check_exact=True)
+        if not source_rows.empty:
+            expected_rows = source_rows.drop(columns=[*NATIVE_FIELDS,'capture_id','run_id'])
+            pd.testing.assert_frame_equal(expected_rows.sort_values('listing_id').reset_index(drop=True),
+                stored[expected_rows.columns].sort_values('listing_id').reset_index(drop=True), check_dtype=False, check_exact=True)
+        elif not stored.empty:
+            raise ValueError('Unexpected stored observations in failed query')
     listing_vins = dict(known_listing_vins)
     vin_listings = {vin: listing for listing,vin in listing_vins.items()}
     for page in pages:
-        if (page.get('http_status') != 200 or page.get('database_outcome') == 'unconfirmed'
-                or not page.get('request_started_at_utc') or not page.get('response_received_at_utc')):
-            raise ValueError('Uncertain response/storage outcome cannot be isolated')
-        journal = json.loads((Path(report_file).parent/'attempts'/f"{page['page']:04d}.json").read_text(encoding='utf-8'))
+        journal = json.loads((Path(report_file).parent/'attempts'/attempt_journal_name(page)).read_text(encoding='utf-8'))
         if any(journal.get(key) != value for key,value in page.items()):
             raise ValueError('Page journal differs from final report')
         request = build_search_request(filters=report['filters'],zip_code=report['zip_code'],
             page=page['page'],location_filter=report.get('location_filter',False))
         if journal['request'] != request:
             raise ValueError('Failed request context differs from planned query')
+        if page.get('database_outcome') == 'deferred' or page.get('status') != 'parsed':
+            if page.get('outcome_kind') == 'transport_failure' and page.get('database_outcome') == 'unconfirmed':
+                raise ValueError('Uncertain response/storage outcome cannot be isolated')
+            if page.get('outcome_kind') == 'server_failure' and (
+                    page.get('database_outcome') == 'unconfirmed' or page.get('http_status') is None
+                    or not page.get('response_received_at_utc')):
+                raise ValueError('Uncertain response/storage outcome cannot be isolated')
+            if page.get('outcome_kind') in {'schema_failure', 'transport_failure', 'server_failure'}:
+                continue
+        if (page.get('http_status') != 200 or page.get('database_outcome') == 'unconfirmed'
+                or not page.get('request_started_at_utc') or not page.get('response_received_at_utc')):
+            raise ValueError('Uncertain response/storage outcome cannot be isolated')
         source = verify_response_evidence(page['response_evidence'])
         projection = project_response(source,request,observed_at=page['response_received_at_utc'])
-        frame = parse_capture(projection)  # Reject missing/invalid VINs and malformed rows.
+        retained = {}
+        if page.get('retained_source'):
+            retained = json.loads(Path(page['retained_source']).read_text(encoding='utf-8'))
+        if retained.get('overlap_parent_models'):
+            projection = dict(projection, overlap_parent_models=retained['overlap_parent_models'])
+        frame = parse_capture(projection)
         for row in frame.itertuples():
             if (row.listing_id in listing_vins and listing_vins[row.listing_id] != row.vin
                     or row.vin in vin_listings and vin_listings[row.vin] != row.listing_id):
